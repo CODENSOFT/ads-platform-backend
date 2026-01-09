@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { sha256 } from '../utils/crypto.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -29,11 +28,11 @@ const userSchema = new mongoose.Schema(
         ref: 'Ad',
       },
     ],
-    resetPasswordTokenHash: {
+    passwordResetToken: {
       type: String,
       select: false,
     },
-    resetPasswordExpiresAt: {
+    passwordResetExpires: {
       type: Date,
       select: false,
     },
@@ -71,17 +70,20 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 
 // Method to create password reset token
 userSchema.methods.createPasswordResetToken = function () {
-  // Generate random token
-  const resetToken = crypto.randomBytes(32).toString('hex');
+  // Generate raw token
+  const rawToken = crypto.randomBytes(32).toString('hex');
 
-  // Hash the token and store it
-  this.resetPasswordTokenHash = sha256(resetToken);
+  // Hash token using sha256
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
 
-  // Set expiration to 15 minutes from now
-  this.resetPasswordExpiresAt = Date.now() + 15 * 60 * 1000;
+  // Set passwordResetToken to hashed value
+  this.passwordResetToken = hashedToken;
+
+  // Set expiration to 10 minutes from now
+  this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
 
   // Return the raw token (not hashed) - this is what we send to the user
-  return resetToken;
+  return rawToken;
 };
 
 const User = mongoose.model('User', userSchema);

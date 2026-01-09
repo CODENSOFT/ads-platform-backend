@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import User from '../models/User.js';
 import { AppError } from '../middlewares/error.middleware.js';
-import { sha256 } from '../utils/crypto.js';
 import { sendPasswordResetEmail } from '../services/email.service.js';
 
 /**
@@ -226,20 +226,20 @@ export const resetPassword = async (req, res, next) => {
       );
     }
 
-    // Hash the token using sha256
-    const hashedToken = sha256(token);
+    // Hash the incoming token using sha256
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Find user where resetPasswordTokenHash matches AND resetPasswordExpiresAt > Date.now()
+    // Find user where passwordResetToken matches AND passwordResetExpires > now
     // Remember fields are select:false, so we need to select them explicitly
     const user = await User.findOne({
-      resetPasswordTokenHash: hashedToken,
-      resetPasswordExpiresAt: { $gt: Date.now() },
-    }).select('+resetPasswordTokenHash +resetPasswordExpiresAt +password');
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() },
+    }).select('+passwordResetToken +passwordResetExpires +password');
 
     // If not found: invalid or expired token
     if (!user) {
       return next(
-        new AppError('Invalid or expired reset token', 400, {
+        new AppError('Token is invalid or expired', 400, {
           type: 'INVALID_TOKEN',
         })
       );
@@ -249,28 +249,16 @@ export const resetPassword = async (req, res, next) => {
     user.password = password;
 
     // Clear reset token fields
-    user.resetPasswordTokenHash = undefined;
-    user.resetPasswordExpiresAt = undefined;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
 
     // Save user
     await user.save();
 
-    // Generate JWT token (same as login)
-    const jwtToken = generateToken(user._id);
-
-    // Return success with token and user data
+    // Return success
     res.status(200).json({
       success: true,
       message: 'Password reset successful',
-      data: {
-        token: jwtToken,
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          createdAt: user.createdAt,
-        },
-      },
     });
   } catch (error) {
     next(error);
