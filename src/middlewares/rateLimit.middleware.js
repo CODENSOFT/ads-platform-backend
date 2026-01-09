@@ -12,7 +12,7 @@ const authRateLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skipSuccessfulRequests: false, // Count successful requests too
-  validate: false, // Disable validation to prevent crashes behind Railway proxy
+  validate: { xForwardedForHeader: false }, // Disable X-Forwarded-For validation to prevent ERR_ERL_UNEXPECTED_X_FORWARDED_FOR crash
 });
 
 // Conditional middleware: only apply rate limiting in production
@@ -35,6 +35,6 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Don't count successful requests
-  validate: false, // Disable validation to prevent crashes behind Railway proxy
+  validate: { xForwardedForHeader: false }, // Disable X-Forwarded-For validation to prevent ERR_ERL_UNEXPECTED_X_FORWARDED_FOR crash
 });
 
