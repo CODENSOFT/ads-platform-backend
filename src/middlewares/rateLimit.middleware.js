@@ -18,6 +18,10 @@ const authRateLimiter = rateLimit({
 
 // Conditional middleware: only apply rate limiting in production
 export const authLimiter = (req, res, next) => {
+  // Skip OPTIONS requests (preflight)
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
   if (process.env.NODE_ENV === 'production') {
     return authRateLimiter(req, res, next);
   }
@@ -26,7 +30,7 @@ export const authLimiter = (req, res, next) => {
 };
 
 // Rate limiting for general API routes
-export const apiLimiter = rateLimit({
+const apiRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   message: {
@@ -39,4 +43,13 @@ export const apiLimiter = rateLimit({
   validate: false, // Disable validation to prevent ERR_ERL_UNEXPECTED_X_FORWARDED_FOR crash
   keyGenerator: (req) => req.ip, // Safe key generator that does not depend on X-Forwarded-For
 });
+
+// Wrapper to skip OPTIONS requests (preflight)
+export const apiLimiter = (req, res, next) => {
+  // Skip OPTIONS requests (preflight)
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  return apiRateLimiter(req, res, next);
+};
 

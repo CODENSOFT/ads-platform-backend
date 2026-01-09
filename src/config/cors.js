@@ -23,7 +23,7 @@ if (process.env.FRONTEND_URL) {
   }
 }
 
-// Add ALLOWED_ORIGINS if they exist (comma separated)
+// Parse ALLOWED_ORIGINS from env (comma separated), trim, remove empty
 if (process.env.ALLOWED_ORIGINS) {
   const additionalOrigins = process.env.ALLOWED_ORIGINS.split(',')
     .map((origin) => origin.trim().replace(/\/+$/, '')) // Remove trailing slashes
@@ -48,18 +48,17 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // Block with clear error message
-    callback(
-      new Error(
-        `CORS: Origin "${origin}" is not allowed. Allowed origins: ${allowedOriginsList.join(', ')}`
-      ),
-      false
-    );
+    // Block - DO NOT throw, just return false
+    // Log preflight failures in development only
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[CORS] Preflight blocked: origin="${origin}"`);
+    }
+    callback(null, false);
   },
   credentials: true,
-  optionsSuccessStatus: 204,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204,
 };
 
 export default corsOptions;

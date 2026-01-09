@@ -18,7 +18,18 @@ if (process.env.NODE_ENV !== 'production') {
 
 const app = express();
 
-app.set('trust proxy', true);
+// Trust proxy - Required for Railway/Vercel
+app.set('trust proxy', 1);
+
+// ============================================
+// CORS - Must be BEFORE rate limiters and routes
+// ============================================
+
+// Handle ALL preflight requests
+app.options('*', cors(corsOptions));
+
+// Apply CORS to all routes
+app.use(cors(corsOptions));
 
 // ============================================
 // SECURITY MIDDLEWARE (Order matters!)
@@ -39,9 +50,6 @@ app.use(
     hidePoweredBy: true, // Remove X-Powered-By header
   })
 );
-
-// 2. CORS - Strict origin whitelist
-app.use(cors(corsOptions));
 
 // 3. Body parser with size limit (10KB for JSON)
 // Note: File uploads are handled separately by multer with its own limits
