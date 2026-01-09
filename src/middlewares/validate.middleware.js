@@ -114,3 +114,37 @@ export const validateUpdateStatus = [
   handleValidationErrors,
 ];
 
+// Validation rules for forgot password
+export const validateForgotPassword = [
+  body('email')
+    .trim()
+    .notEmpty()
+    .withMessage('Email is required')
+    .isEmail()
+    .withMessage('Please provide a valid email')
+    .normalizeEmail(),
+  handleValidationErrors,
+];
+
+// Validation rules for reset password
+export const validateResetPassword = [
+  // Validate token param exists
+  (req, res, next) => {
+    if (!req.params.token) {
+      return next(
+        new AppError('Reset token is required', 400, {
+          field: 'token',
+          message: 'Reset token is required in URL',
+        })
+      );
+    }
+    next();
+  },
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters long'),
+  handleValidationErrors,
+];
+
