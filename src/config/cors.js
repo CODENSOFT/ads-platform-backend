@@ -17,16 +17,17 @@ const allowedOriginsList = [
 
 // Add FRONTEND_URL if it exists (for Vercel production)
 if (process.env.FRONTEND_URL) {
-  const frontendUrl = process.env.FRONTEND_URL.replace(/\/+$/, ''); // Remove trailing slashes
+  const frontendUrl = process.env.FRONTEND_URL.trim().replace(/\/+$/, ''); // Normalize: trim and remove trailing slash
   if (!allowedOriginsList.includes(frontendUrl)) {
     allowedOriginsList.push(frontendUrl);
   }
 }
 
-// Parse ALLOWED_ORIGINS from env (comma separated), trim, remove empty
+// Read ALLOWED_ORIGINS from env and split by comma
+// Normalize entries: trim spaces, remove trailing slash
 if (process.env.ALLOWED_ORIGINS) {
   const additionalOrigins = process.env.ALLOWED_ORIGINS.split(',')
-    .map((origin) => origin.trim().replace(/\/+$/, '')) // Remove trailing slashes
+    .map((origin) => origin.trim().replace(/\/+$/, '')) // Normalize: trim and remove trailing slash
     .filter((origin) => origin.length > 0);
   
   additionalOrigins.forEach((origin) => {
@@ -38,22 +39,27 @@ if (process.env.ALLOWED_ORIGINS) {
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (Postman, server-to-server, mobile apps, curl, etc.)
+    // Allow if origin is undefined (Postman, server-to-server, mobile apps, curl, etc.)
     if (!origin) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[CORS] origin:', origin, 'allowed: true (no origin)');
+      }
       return callback(null, true);
     }
 
-    // Check if origin is in allowed list
-    if (allowedOriginsList.includes(origin)) {
-      return callback(null, true);
-    }
+    // Normalize incoming origin: remove trailing slash
+    const normalizedOrigin = origin.replace(/\/+$/, '');
 
-    // Block - DO NOT throw, just return false
-    // Log preflight failures in development only
+    // Check if normalized origin is in normalized list
+    const isAllowed = allowedOriginsList.includes(normalizedOrigin);
+
+    // Debug log in development only
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`[CORS] Preflight blocked: origin="${origin}"`);
+      console.log('[CORS] origin:', normalizedOrigin, 'allowed:', isAllowed);
     }
-    callback(null, false);
+
+    // Do NOT throw. If not allowed: callback(null, false)
+    callback(null, isAllowed);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
