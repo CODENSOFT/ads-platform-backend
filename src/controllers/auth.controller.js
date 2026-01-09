@@ -166,8 +166,9 @@ export const forgotPassword = async (req, res, next) => {
       // Save user with validateBeforeSave:false to skip validation
       await user.save({ validateBeforeSave: false });
 
-      // Build reset URL
-      resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
+      // Build reset URL (HashRouter compatible)
+      const base = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+      resetUrl = `${base}/#/reset-password/${resetToken}`;
 
       // Send password reset email
       emailResult = await sendPasswordResetEmail({
