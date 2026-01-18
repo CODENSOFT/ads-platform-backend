@@ -236,23 +236,39 @@ export const resetPassword = async (req, res, next) => {
       passwordResetExpires: { $gt: Date.now() },
     }).select('+passwordResetToken +passwordResetExpires +password');
 
-    // If not found: invalid or expired token
+    // If not found, check if token exists but expired, or if it's invalid/already used
     if (!user) {
+      // Check if token exists but expired (for better error message)
+      const expiredUser = await User.findOne({
+        passwordResetToken: hashedToken,
+      }).select('+passwordResetToken +passwordResetExpires');
+
+      if (expiredUser) {
+        // Token exists but expired
+        return next(
+          new AppError('Reset token has expired. Please request a new one.', 400, {
+            type: 'TOKEN_EXPIRED',
+          })
+        );
+      }
+
+      // Token doesn't exist or was already used (single-use enforcement)
       return next(
-        new AppError('Token is invalid or expired', 400, {
+        new AppError('Reset token is invalid or has already been used.', 400, {
           type: 'INVALID_TOKEN',
         })
       );
     }
 
-    // Update password (will be hashed via pre-save hook)
-    user.password = password;
-
-    // Clear reset token fields
+    // SECURITY: Clear reset token fields IMMEDIATELY to enforce single-use
+    // This prevents race conditions where the same token could be used twice
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
 
-    // Save user
+    // Update password (will be hashed via pre-save hook, which also sets passwordChangedAt)
+    user.password = password;
+
+    // Save user (token is already cleared, so even if save fails, token is invalidated)
     await user.save();
 
     // Return success

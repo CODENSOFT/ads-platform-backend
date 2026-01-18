@@ -36,6 +36,10 @@ const userSchema = new mongoose.Schema(
       type: Date,
       select: false,
     },
+    passwordChangedAt: {
+      type: Date,
+      select: false,
+    },
   },
   {
     timestamps: true,
@@ -61,6 +65,9 @@ userSchema.pre('save', async function () {
 
   // Hash password with bcrypt (salt rounds: 12)
   this.password = await bcrypt.hash(this.password, 12);
+
+  // Track when password was changed (for security: invalidate old tokens)
+  this.passwordChangedAt = Date.now();
 });
 
 // Method to compare password
@@ -79,8 +86,8 @@ userSchema.methods.createPasswordResetToken = function () {
   // Set passwordResetToken to hashed value
   this.passwordResetToken = hashedToken;
 
-  // Set expiration to 10 minutes from now
-  this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
+  // Set expiration to 15 minutes from now
+  this.passwordResetExpires = Date.now() + 15 * 60 * 1000;
 
   // Return the raw token (not hashed) - this is what we send to the user
   return rawToken;
