@@ -53,3 +53,57 @@ export const apiLimiter = (req, res, next) => {
   return apiRateLimiter(req, res, next);
 };
 
+// Rate limiting for forgot-password (more lenient than general auth)
+const forgotPasswordRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 5 : 20, // 5 in production, 20 in development
+  message: {
+    success: false,
+    message: 'Too many reset attempts, try again later',
+    details: {
+      type: 'RATE_LIMIT',
+    },
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false, // Count successful requests too
+  validate: false, // Disable validation to prevent ERR_ERL_UNEXPECTED_X_FORWARDED_FOR crash
+  keyGenerator: (req) => req.ip, // Safe key generator that does not depend on X-Forwarded-For
+});
+
+// Wrapper for forgot-password limiter
+export const forgotPasswordLimiter = (req, res, next) => {
+  // Skip OPTIONS requests (preflight)
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  return forgotPasswordRateLimiter(req, res, next);
+};
+
+// Rate limiting for reset-password (more lenient than forgot-password)
+const resetPasswordRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 10 : 30, // 10 in production, 30 in development
+  message: {
+    success: false,
+    message: 'Too many reset attempts, try again later',
+    details: {
+      type: 'RATE_LIMIT',
+    },
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false, // Count successful requests too
+  validate: false, // Disable validation to prevent ERR_ERL_UNEXPECTED_X_FORWARDED_FOR crash
+  keyGenerator: (req) => req.ip, // Safe key generator that does not depend on X-Forwarded-For
+});
+
+// Wrapper for reset-password limiter
+export const resetPasswordLimiter = (req, res, next) => {
+  // Skip OPTIONS requests (preflight)
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  return resetPasswordRateLimiter(req, res, next);
+};
+

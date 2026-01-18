@@ -19,7 +19,10 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 
 // Trust proxy - Required for Railway/Vercel (must be first)
-app.set('trust proxy', 1);
+// Only enable in production to ensure proper IP detection behind reverse proxy
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
 // ============================================
 // CORS - FIRST middleware (before everything else)
