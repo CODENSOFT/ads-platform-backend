@@ -2,27 +2,26 @@ import mongoose from 'mongoose';
 
 const chatSchema = new mongoose.Schema(
   {
-    ad: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Ad',
-      default: null,
-    },
-    userA: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: [true, 'userA is required'],
-    },
-    userB: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: [true, 'userB is required'],
+    participants: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+      ],
+      required: [true, 'Participants are required'],
+      validate: {
+        validator: function (participants) {
+          return participants && participants.length === 2;
+        },
+        message: 'Chat must have exactly 2 participants',
+      },
     },
     lastMessage: {
-      type: String,
-      default: '',
-    },
-    lastMessageAt: {
-      type: Date,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Message',
+      default: null,
     },
   },
   {
@@ -31,23 +30,8 @@ const chatSchema = new mongoose.Schema(
   }
 );
 
-// Ensure userA and userB are always sorted lexicographically
-chatSchema.pre('save', function (next) {
-  if (this.isModified('userA') || this.isModified('userB') || this.isNew) {
-    // Only sort if both userA and userB exist
-    if (this.userA && this.userB) {
-      const [a, b] = [this.userA.toString(), this.userB.toString()].sort((x, y) =>
-        x.localeCompare(y)
-      );
-      this.userA = new mongoose.Types.ObjectId(a);
-      this.userB = new mongoose.Types.ObjectId(b);
-    }
-  }
-  next();
-});
-
-// Unique compound index: one chat per ad + user pair
-chatSchema.index({ ad: 1, userA: 1, userB: 1 }, { unique: true });
+// Index for efficient queries: find chats by participants
+chatSchema.index({ participants: 1 });
 
 const Chat = mongoose.model('Chat', chatSchema);
 

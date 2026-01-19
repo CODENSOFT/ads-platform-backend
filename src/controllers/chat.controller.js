@@ -1,9 +1,9 @@
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
-import Ad from '../models/Ad.js';
 import User from '../models/User.js';
 import mongoose from 'mongoose';
 import { AppError } from '../middlewares/error.middleware.js';
+import logger from '../config/logger.js';
 
 /**
  * Start or get existing chat
@@ -21,28 +21,19 @@ export const startChat = async (req, res, next) => {
     }
 
     const currentUserId = req.user._id;
-    const { adId, receiverId } = req.body;
+    const { receiverId } = req.body;
 
-    // Validate required fields - receiverId is required, adId is optional
-    if (!receiverId) {
+    // Validate receiverId exists and is non-empty string
+    if (!receiverId || typeof receiverId !== 'string' || receiverId.trim().length === 0) {
       return next(
-        new AppError('receiverId is required', 400, {
+        new AppError('receiverId is required and must be a non-empty string', 400, {
           type: 'VALIDATION_ERROR',
           field: 'receiverId',
         })
       );
     }
 
-    // Validate ObjectId formats
-    if (adId && !mongoose.Types.ObjectId.isValid(adId)) {
-      return next(
-        new AppError('Invalid adId format', 400, {
-          type: 'INVALID_ID',
-          field: 'adId',
-        })
-      );
-    }
-
+    // Validate receiverId is valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(receiverId)) {
       return next(
         new AppError('Invalid receiverId format', 400, {
@@ -61,7 +52,7 @@ export const startChat = async (req, res, next) => {
       );
     }
 
-    // Ensure receiver user exists
+    // Ensure receiver user exists in DB
     const receiver = await User.findById(receiverId);
     if (!receiver) {
       return next(
@@ -72,125 +63,118 @@ export const startChat = async (req, res, next) => {
       );
     }
 
-    // Ensure ad exists if adId is provided
-    if (adId) {
-      const ad = await Ad.findById(adId);
-      if (!ad) {
-        return next(
-          new AppError('Ad not found', 404, {
-            type: 'NOT_FOUND',
-            resource: 'Ad',
-          })
-        );
-      }
-    }
+    // Convert to ObjectIds for query
+    const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
+    const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
 
-    // Compute sorted pair (userA < userB lexicographically)
-    const [userA, userB] = [currentUserId.toString(), receiverId]
-      .sort((a, b) => a.localeCompare(b))
-      .map((id) => new mongoose.Types.ObjectId(id));
+    // Find existing chat between the two participants
+    // Query: participants contains both users AND exactly 2 participants
+    const existingChat = await Chat.findOne({
+      participants: { $all: [currentUserObjectId, receiverObjectId] },
+      $expr: { $eq: [{ $size: '$participants' }, 2] },
+    });
 
-    // Build query - if adId is provided, include it; otherwise find chat without ad (null)
-    const query = adId
-      ? { ad: adId, userA, userB }
-      : { userA, userB, ad: null };
-
-    // Find existing chat
-    let chat = await Chat.findOne(query);
-    
-    if (chat) {
-      // Populate fields
-      await chat.populate([
-        { path: 'ad', select: 'title price currency images status', strictPopulate: false },
-        { path: 'userA', select: 'name email' },
-        { path: 'userB', select: 'name email' },
-      ]);
+    if (existingChat) {
+      // Populate participants (name, email)
+      await existingChat.populate('participants', 'name email');
 
       // Return existing chat
       return res.status(200).json({
         success: true,
         chat: {
-          _id: chat._id,
-          ad: chat.ad,
-          userA: chat.userA,
-          userB: chat.userB,
-          lastMessage: chat.lastMessage,
-          lastMessageAt: chat.lastMessageAt,
-          createdAt: chat.createdAt,
-          updatedAt: chat.updatedAt,
+          _id: existingChat._id,
+          participants: existingChat.participants,
+          lastMessage: existingChat.lastMessage,
+          createdAt: existingChat.createdAt,
+          updatedAt: existingChat.updatedAt,
         },
       });
     }
 
-    // Create new chat (adId can be null/undefined if not provided)
-    chat = await Chat.create({
-      ad: adId || null,
-      userA,
-      userB,
+    // Create new chat
+    const newChat = await Chat.create({
+      participants: [currentUserObjectId, receiverObjectId],
     });
 
-    // Populate after creation
-    await chat.populate([
-      { path: 'ad', select: 'title price currency images status', strictPopulate: false },
-      { path: 'userA', select: 'name email' },
-      { path: 'userB', select: 'name email' },
-    ]);
+    // Populate participants (name, email)
+    await newChat.populate('participants', 'name email');
 
     // Return new chat
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       chat: {
-        _id: chat._id,
-        ad: chat.ad,
-        userA: chat.userA,
-        userB: chat.userB,
-        lastMessage: chat.lastMessage,
-        lastMessageAt: chat.lastMessageAt,
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
+        _id: newChat._id,
+        participants: newChat.participants,
+        lastMessage: newChat.lastMessage,
+        createdAt: newChat.createdAt,
+        updatedAt: newChat.updatedAt,
       },
     });
   } catch (error) {
-    // Handle duplicate key error (shouldn't happen with proper logic, but just in case)
+    // Log error for debugging (500 errors)
+    logger.error('[CHAT_START_ERROR]', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      name: error.name,
+      userId: req.user?._id?.toString(),
+      receiverId: req.body?.receiverId,
+    });
+
+    // If it's a validation error from Mongoose, convert to 400
+    if (error instanceof mongoose.Error.ValidationError) {
+      return next(
+        new AppError('Validation failed', 400, {
+          type: 'VALIDATION_ERROR',
+          errors: Object.values(error.errors).map((err) => ({
+            field: err.path,
+            message: err.message,
+          })),
+        })
+      );
+    }
+
+    // If it's a duplicate key error, try to find existing chat
     if (error.code === 11000) {
-      const { adId, receiverId } = req.body;
-      const currentUserId = req.user._id;
-      const [userA, userB] = [currentUserId.toString(), receiverId]
-        .sort((a, b) => a.localeCompare(b))
-        .map((id) => new mongoose.Types.ObjectId(id));
+      try {
+        const currentUserId = req.user?._id;
+        const { receiverId } = req.body;
 
-      const query = adId
-        ? { ad: adId, userA, userB }
-        : { userA, userB, ad: null };
+        if (currentUserId && receiverId && mongoose.Types.ObjectId.isValid(receiverId)) {
+          const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
+          const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
 
-      const existingChat = await Chat.findOne(query);
-      
-      if (existingChat) {
-        await existingChat.populate([
-          { path: 'ad', select: 'title price currency images status', strictPopulate: false },
-          { path: 'userA', select: 'name email' },
-          { path: 'userB', select: 'name email' },
-        ]);
-      }
+          const existingChat = await Chat.findOne({
+            participants: { $all: [currentUserObjectId, receiverObjectId] },
+            $expr: { $eq: [{ $size: '$participants' }, 2] },
+          });
 
-      if (existingChat) {
-        return res.status(200).json({
-          success: true,
-          chat: {
-            _id: existingChat._id,
-            ad: existingChat.ad,
-            userA: existingChat.userA,
-            userB: existingChat.userB,
-            lastMessage: existingChat.lastMessage,
-            lastMessageAt: existingChat.lastMessageAt,
-            createdAt: existingChat.createdAt,
-            updatedAt: existingChat.updatedAt,
-          },
+          if (existingChat) {
+            await existingChat.populate('participants', 'name email');
+
+            return res.status(200).json({
+              success: true,
+              chat: {
+                _id: existingChat._id,
+                participants: existingChat.participants,
+                lastMessage: existingChat.lastMessage,
+                createdAt: existingChat.createdAt,
+                updatedAt: existingChat.updatedAt,
+              },
+            });
+          }
+        }
+      } catch (retryError) {
+        // If retry fails, pass original error
+        logger.error('[CHAT_START_RETRY_ERROR]', {
+          message: retryError.message,
+          originalError: error.message,
         });
       }
     }
 
-    next(error);
+    // Pass error to error handler middleware
+    return next(error);
   }
 };
 
@@ -211,13 +195,12 @@ export const getChats = async (req, res, next) => {
 
     const currentUserId = req.user._id;
 
-    // Find all chats where user is either userA or userB
+    // Find all chats where user is a participant
     const chats = await Chat.find({
-      $or: [{ userA: currentUserId }, { userB: currentUserId }],
+      participants: currentUserId,
     })
-      .populate('ad', 'title price currency images status')
-      .populate('userA', 'name email')
-      .populate('userB', 'name email')
+      .populate('participants', 'name email')
+      .populate('lastMessage')
       .sort({ updatedAt: -1 })
       .lean();
 
@@ -270,9 +253,9 @@ export const getMessages = async (req, res, next) => {
     }
 
     // Check if user is participant
-    const isParticipant =
-      chat.userA.toString() === currentUserId.toString() ||
-      chat.userB.toString() === currentUserId.toString();
+    const isParticipant = chat.participants.some(
+      (participantId) => participantId.toString() === currentUserId.toString()
+    );
 
     if (!isParticipant) {
       return next(
@@ -357,9 +340,9 @@ export const sendMessage = async (req, res, next) => {
     }
 
     // Check if user is participant
-    const isParticipant =
-      chat.userA.toString() === currentUserId.toString() ||
-      chat.userB.toString() === currentUserId.toString();
+    const isParticipant = chat.participants.some(
+      (participantId) => participantId.toString() === currentUserId.toString()
+    );
 
     if (!isParticipant) {
       return next(
@@ -381,8 +364,7 @@ export const sendMessage = async (req, res, next) => {
 
     // Update chat lastMessage and lastMessageAt
     await Chat.findByIdAndUpdate(chatId, {
-      lastMessage: text.trim(),
-      lastMessageAt: new Date(),
+      lastMessage: message._id,
       updatedAt: new Date(),
     });
 
@@ -401,17 +383,3 @@ export const sendMessage = async (req, res, next) => {
     next(error);
   }
 };
-
-/*
- * Postman test instructions:
- * 
- * POST {{BASE_URL}}/api/chats/start
- * Headers:
- *   Content-Type: application/json
- *   Authorization: Bearer <token>
- * Body:
- * {
- *   "adId": "<ad_id>",
- *   "receiverId": "<user_id>"
- * }
- */
