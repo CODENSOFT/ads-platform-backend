@@ -20,6 +20,29 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
+// Map category/subcategory to categorySlug/subCategorySlug for compatibility
+const mapCategoryFields = (req, res, next) => {
+  // If category is provided but categorySlug is not, map it
+  if (req.body.category && !req.body.categorySlug) {
+    req.body.categorySlug = req.body.category;
+    delete req.body.category;
+  }
+  
+  // If subcategory is provided but subCategorySlug is not, map it
+  if (req.body.subcategory && !req.body.subCategorySlug) {
+    req.body.subCategorySlug = req.body.subcategory;
+    delete req.body.subcategory;
+  }
+  
+  // Also handle subCategory (camelCase variant)
+  if (req.body.subCategory && !req.body.subCategorySlug) {
+    req.body.subCategorySlug = req.body.subCategory;
+    delete req.body.subCategory;
+  }
+  
+  next();
+};
+
 // Check for extra fields (not allowed)
 const checkExtraFields = (allowedFields) => {
   return (req, res, next) => {
@@ -43,6 +66,8 @@ const checkExtraFields = (allowedFields) => {
 
 // Validation rules for create ad
 export const validateCreateAd = [
+  // Map category/subcategory to categorySlug/subCategorySlug (must be first)
+  mapCategoryFields,
   // Check for extra fields first - status is NOT allowed at creation
   checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'categorySlug', 'subCategorySlug']),
   
@@ -114,6 +139,8 @@ export const validateCreateAd = [
 
 // Validation rules for update ad
 export const validateUpdateAd = [
+  // Map category/subcategory to categorySlug/subCategorySlug (must be first)
+  mapCategoryFields,
   // Check for extra fields first
   checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'status', 'categorySlug', 'subCategorySlug']),
   

@@ -339,13 +339,14 @@ export const createAd = async (req, res, next) => {
 
     // Extract ONLY allowed fields from request body
     // Strict filtering to prevent injection of protected fields
+    // Support both category/categorySlug and subcategory/subCategorySlug for compatibility
     const allowedFields = {
       title: req.body.title,
       description: req.body.description,
       price: req.body.price,
       currency: req.body.currency,
-      categorySlug: req.body.categorySlug,
-      subCategorySlug: req.body.subCategorySlug,
+      categorySlug: req.body.categorySlug || req.body.category,
+      subCategorySlug: req.body.subCategorySlug || req.body.subcategory || req.body.subCategory,
     };
 
     // Validate required fields
