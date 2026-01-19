@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 
 // Only load .env file in development (not required in production if env vars are provided)
 if (process.env.NODE_ENV !== 'production') {
-  dotenv.config();
+dotenv.config();
 }
 
 // Build allowed origins array

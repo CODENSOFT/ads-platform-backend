@@ -122,7 +122,7 @@ export const errorHandler = (err, req, res, next) => {
   };
 
   // Standardize validation errors: ensure details.errors format
-  if (details) {
+    if (details) {
     // If details has errors array, use it directly
     if (details.errors && Array.isArray(details.errors)) {
       response.details = { errors: details.errors };

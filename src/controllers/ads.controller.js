@@ -216,9 +216,9 @@ export const getAdById = async (req, res, next) => {
       if (adUserId === currentUserId) {
         // User is owner: return ad (any status)
         return res.json({
-          success: true,
-          ad,
-        });
+      success: true,
+      ad,
+    });
       } else {
         // User is authenticated but not owner: return 404 (don't leak ad existence)
         return next(
