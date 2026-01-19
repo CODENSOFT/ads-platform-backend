@@ -179,6 +179,38 @@ export const startChat = async (req, res, next) => {
 };
 
 /**
+ * Get unread messages count for current user
+ * GET /api/chats/unread-count
+ */
+export const unreadCount = async (req, res, next) => {
+  try {
+    // Ensure req.user exists and has _id
+    if (!req.user || !req.user._id) {
+      return next(
+        new AppError('Authentication required', 401, {
+          type: 'AUTH_REQUIRED',
+        })
+      );
+    }
+
+    const currentUserId = req.user._id;
+
+    // Count unread messages for current user
+    const count = await Message.countDocuments({
+      receiver: currentUserId,
+      isRead: false,
+    });
+
+    res.status(200).json({
+      success: true,
+      count,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Get all chats for current user
  * GET /api/chats
  */
@@ -271,6 +303,12 @@ export const getMessages = async (req, res, next) => {
       .sort({ createdAt: 1 })
       .lean();
 
+    // Mark messages as read for current user (only messages received by user)
+    await Message.updateMany(
+      { chat: chatId, receiver: currentUserId, isRead: false },
+      { $set: { isRead: true } }
+    );
+
     res.status(200).json({
       success: true,
       messages,
@@ -352,11 +390,26 @@ export const sendMessage = async (req, res, next) => {
       );
     }
 
-    // Create message
+    // Determine receiver (the other participant in the chat)
+    const receiverId = chat.participants.find(
+      (participantId) => participantId.toString() !== currentUserId.toString()
+    );
+
+    if (!receiverId) {
+      return next(
+        new AppError('Cannot determine receiver', 400, {
+          type: 'INVALID_CHAT',
+        })
+      );
+    }
+
+    // Create message with receiver
     const message = await Message.create({
       chat: chatId,
       sender: currentUserId,
+      receiver: receiverId,
       text: text.trim(),
+      isRead: false, // New message is unread by default
     });
 
     // Populate sender
@@ -374,7 +427,9 @@ export const sendMessage = async (req, res, next) => {
         _id: message._id,
         chat: message.chat,
         sender: message.sender,
+        receiver: message.receiver,
         text: message.text,
+        isRead: message.isRead,
         createdAt: message.createdAt,
         updatedAt: message.updatedAt,
       },

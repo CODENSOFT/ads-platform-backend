@@ -13,12 +13,23 @@ const messageSchema = new mongoose.Schema(
       ref: 'User',
       required: [true, 'Sender is required'],
     },
+    receiver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Receiver is required'],
+      index: true,
+    },
     text: {
       type: String,
       required: [true, 'Message text is required'],
       trim: true,
       minlength: [1, 'Message text cannot be empty'],
       maxlength: [2000, 'Message text cannot exceed 2000 characters'],
+    },
+    isRead: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
   },
   {
@@ -27,8 +38,10 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-// Compound index for efficient message queries
+// Compound indexes for efficient message queries
 messageSchema.index({ chat: 1, createdAt: 1 });
+messageSchema.index({ receiver: 1, isRead: 1 });
+messageSchema.index({ chat: 1, receiver: 1, isRead: 1 });
 
 const Message = mongoose.model('Message', messageSchema);
 

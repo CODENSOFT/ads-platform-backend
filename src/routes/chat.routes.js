@@ -4,6 +4,7 @@ import {
   getChats,
   getMessages,
   sendMessage,
+  unreadCount,
 } from '../controllers/chat.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 
@@ -31,6 +32,16 @@ router.post('/start', startChat);
 if (process.env.NODE_ENV !== 'production') {
   console.log('[CHAT ROUTES] POST /api/chats/start registered');
 }
+
+/**
+ * @route   GET /api/chats/unread-count
+ * @desc    Get unread messages count for current user
+ * @access  Private
+ * @middleware protect - JWT authentication required
+ * 
+ * IMPORTANT: This route MUST be defined before /:id routes to avoid route conflicts
+ */
+router.get('/unread-count', unreadCount);
 
 /**
  * @route   GET /api/chats
