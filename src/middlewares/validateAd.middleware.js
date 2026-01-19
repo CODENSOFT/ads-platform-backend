@@ -1,6 +1,6 @@
 import { body, validationResult } from 'express-validator';
 import { AppError } from './error.middleware.js';
-import { isValidCategory, isValidSubCategory } from '../utils/categoryValidator.js';
+import { isValidCategorySlug, isValidSubcategorySlug } from '../constants/categories.js';
 
 // Middleware to handle validation errors
 const handleValidationErrors = (req, res, next) => {
@@ -17,29 +17,6 @@ const handleValidationErrors = (req, res, next) => {
       })
     );
   }
-  next();
-};
-
-// Map category/subcategory to categorySlug/subCategorySlug for compatibility
-const mapCategoryFields = (req, res, next) => {
-  // If category is provided but categorySlug is not, map it
-  if (req.body.category && !req.body.categorySlug) {
-    req.body.categorySlug = req.body.category;
-    delete req.body.category;
-  }
-  
-  // If subcategory is provided but subCategorySlug is not, map it
-  if (req.body.subcategory && !req.body.subCategorySlug) {
-    req.body.subCategorySlug = req.body.subcategory;
-    delete req.body.subcategory;
-  }
-  
-  // Also handle subCategory (camelCase variant)
-  if (req.body.subCategory && !req.body.subCategorySlug) {
-    req.body.subCategorySlug = req.body.subCategory;
-    delete req.body.subCategory;
-  }
-  
   next();
 };
 
@@ -66,9 +43,8 @@ const checkExtraFields = (allowedFields) => {
 
 // Validation rules for create ad
 export const validateCreateAd = [
-  // Map category/subcategory to categorySlug/subCategorySlug (must be first)
-  mapCategoryFields,
   // Check for extra fields first - status is NOT allowed at creation
+  // Only categorySlug and subCategorySlug are accepted (not category/subcategory)
   checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'categorySlug', 'subCategorySlug']),
   
   // Validate title
@@ -112,23 +88,24 @@ export const validateCreateAd = [
     .notEmpty()
     .withMessage('Category is required')
     .custom((value) => {
-      if (!isValidCategory(value)) {
+      if (!isValidCategorySlug(value)) {
         throw new Error('Invalid category');
       }
       return true;
     }),
   
-  // Validate subCategorySlug (required)
+  // Validate subCategorySlug (optional for create, but if provided must be valid)
   body('subCategorySlug')
+    .optional()
     .trim()
     .notEmpty()
-    .withMessage('Subcategory is required')
+    .withMessage('Subcategory cannot be empty')
     .custom((value, { req }) => {
       const categorySlug = req.body.categorySlug;
       if (!categorySlug) {
         throw new Error('Category must be provided before subcategory');
       }
-      if (!isValidSubCategory(categorySlug, value)) {
+      if (!isValidSubcategorySlug(categorySlug, value)) {
         throw new Error('Invalid subcategory for the selected category');
       }
       return true;
@@ -139,9 +116,8 @@ export const validateCreateAd = [
 
 // Validation rules for update ad
 export const validateUpdateAd = [
-  // Map category/subcategory to categorySlug/subCategorySlug (must be first)
-  mapCategoryFields,
   // Check for extra fields first
+  // Only categorySlug and subCategorySlug are accepted (not category/subcategory)
   checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'status', 'categorySlug', 'subCategorySlug']),
   
   // Validate title (optional for update)
@@ -199,7 +175,7 @@ export const validateUpdateAd = [
     .notEmpty()
     .withMessage('Category cannot be empty')
     .custom((value) => {
-      if (!isValidCategory(value)) {
+      if (!isValidCategorySlug(value)) {
         throw new Error('Invalid category');
       }
       return true;
@@ -213,7 +189,7 @@ export const validateUpdateAd = [
     .withMessage('Subcategory cannot be empty')
     .custom((value, { req }) => {
       const categorySlug = req.body.categorySlug;
-      if (categorySlug && !isValidSubCategory(categorySlug, value)) {
+      if (categorySlug && !isValidSubcategorySlug(categorySlug, value)) {
         throw new Error('Invalid subcategory for the selected category');
       }
       return true;

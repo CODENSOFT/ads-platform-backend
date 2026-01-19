@@ -1,5 +1,5 @@
 /**
- * Categories and subcategories configuration
+ * Categories and subcategories constants
  * This is the single source of truth for all categories in the system
  */
 export const categories = [
@@ -195,7 +195,7 @@ export const categories = [
  * @param {string} categorySlug
  * @returns {object|null}
  */
-export const getCategoryBySlug = (categorySlug) => {
+const getCategoryBySlug = (categorySlug) => {
   return categories.find((cat) => cat.slug === categorySlug) || null;
 };
 
@@ -205,9 +205,52 @@ export const getCategoryBySlug = (categorySlug) => {
  * @param {string} subCategorySlug
  * @returns {object|null}
  */
-export const getSubCategoryBySlugs = (categorySlug, subCategorySlug) => {
+const getSubCategoryBySlugs = (categorySlug, subCategorySlug) => {
   const category = getCategoryBySlug(categorySlug);
   if (!category) return null;
   return category.subcategories.find((sub) => sub.slug === subCategorySlug) || null;
+};
+
+/**
+ * Check if category slug is valid
+ * @param {string} categorySlug
+ * @returns {boolean}
+ */
+export const isValidCategorySlug = (categorySlug) => {
+  if (!categorySlug || typeof categorySlug !== 'string') {
+    return false;
+  }
+  return getCategoryBySlug(categorySlug) !== null;
+};
+
+/**
+ * Check if subcategory slug is valid for given category
+ * @param {string} categorySlug
+ * @param {string} subCategorySlug
+ * @returns {boolean}
+ */
+export const isValidSubcategorySlug = (categorySlug, subCategorySlug) => {
+  if (!categorySlug || !subCategorySlug) {
+    return false;
+  }
+  if (typeof categorySlug !== 'string' || typeof subCategorySlug !== 'string') {
+    return false;
+  }
+  return getSubCategoryBySlugs(categorySlug, subCategorySlug) !== null;
+};
+
+/**
+ * Get categories for public API (only slug, label, and subcategories)
+ * @returns {array} Array of categories with subcategories (public format)
+ */
+export const getCategoriesPublic = () => {
+  return categories.map((category) => ({
+    slug: category.slug,
+    label: category.label,
+    subcategories: category.subcategories.map((sub) => ({
+      slug: sub.slug,
+      label: sub.label,
+    })),
+  }));
 };
 

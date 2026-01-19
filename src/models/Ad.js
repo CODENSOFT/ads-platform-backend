@@ -35,7 +35,7 @@ const adSchema = new mongoose.Schema(
     },
     subCategorySlug: {
       type: String,
-      required: [true, 'Subcategory is required'],
+      required: false, // Optional
       trim: true,
     },
     status: {

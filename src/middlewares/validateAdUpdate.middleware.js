@@ -1,6 +1,6 @@
 import { body, validationResult } from 'express-validator';
 import { AppError } from './error.middleware.js';
-import { isValidCategory, isValidSubCategory } from '../utils/categoryValidator.js';
+import { isValidCategorySlug, isValidSubcategorySlug } from '../constants/categories.js';
 
 // Middleware to handle validation errors
 const handleValidationErrors = (req, res, next) => {
@@ -109,7 +109,7 @@ export const validateAdUpdate = [
     .notEmpty()
     .withMessage('Category cannot be empty')
     .custom((value) => {
-      if (!isValidCategory(value)) {
+      if (!isValidCategorySlug(value)) {
         throw new Error('Invalid category');
       }
       return true;
@@ -123,7 +123,7 @@ export const validateAdUpdate = [
     .withMessage('Subcategory cannot be empty')
     .custom((value, { req }) => {
       const categorySlug = req.body.categorySlug;
-      if (categorySlug && !isValidSubCategory(categorySlug, value)) {
+      if (categorySlug && !isValidSubcategorySlug(categorySlug, value)) {
         throw new Error('Invalid subcategory for the selected category');
       }
       return true;
