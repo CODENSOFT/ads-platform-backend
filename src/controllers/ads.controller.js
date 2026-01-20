@@ -37,11 +37,13 @@ export const getAds = async (req, res, next) => {
   try {
     const {
       q,
+      search,
       minPrice,
       maxPrice,
       currency,
       categorySlug,
       subCategorySlug,
+      sort,
       page,
       limit,
     } = req.query;
@@ -53,16 +55,18 @@ export const getAds = async (req, res, next) => {
     };
 
     // Text search by title or description (case-insensitive)
-    // Only apply if q exists and has non-empty content after trimming
-    if (q && typeof q === 'string' && q.trim().length > 0) {
-      const qEscaped = escapeRegex(q.trim());
+    // Support both 'q' (backward compatibility) and 'search' parameters
+    const searchTerm = search || q;
+    if (searchTerm && typeof searchTerm === 'string' && searchTerm.trim().length > 0) {
+      const searchEscaped = escapeRegex(searchTerm.trim());
       query.$or = [
-        { title: { $regex: qEscaped, $options: 'i' } },
-        { description: { $regex: qEscaped, $options: 'i' } },
+        { title: { $regex: searchEscaped, $options: 'i' } },
+        { description: { $regex: searchEscaped, $options: 'i' } },
       ];
     }
 
     // Filter by price range
+    // Ignore invalid values (NaN) instead of throwing 400
     if (minPrice || maxPrice) {
       query.price = {};
       if (minPrice) {
@@ -84,8 +88,13 @@ export const getAds = async (req, res, next) => {
     }
 
     // Filter by currency (exact match if provided)
+    // Trim string and validate it's one of allowed values
     if (currency && typeof currency === 'string' && currency.trim().length > 0) {
-      query.currency = currency.trim();
+      const currencyTrimmed = currency.trim();
+      const allowedCurrencies = ['EUR', 'USD', 'MDL'];
+      if (allowedCurrencies.includes(currencyTrimmed)) {
+        query.currency = currencyTrimmed;
+      }
     }
 
     // Filter by categorySlug and subCategorySlug
@@ -152,11 +161,31 @@ export const getAds = async (req, res, next) => {
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
     const skip = (pageNum - 1) * limitNum;
 
-    // Execute query with pagination
+    // Sorting logic
+    // Default: newest (createdAt desc)
+    // Options: newest, price_asc, price_desc
+    let sortOptions = { createdAt: -1 }; // Default: newest first
+    if (sort && typeof sort === 'string') {
+      const sortValue = sort.trim().toLowerCase();
+      switch (sortValue) {
+        case 'price_asc':
+          sortOptions = { price: 1, createdAt: -1 }; // Price ascending, then newest first
+          break;
+        case 'price_desc':
+          sortOptions = { price: -1, createdAt: -1 }; // Price descending, then newest first
+          break;
+        case 'newest':
+        default:
+          sortOptions = { createdAt: -1 }; // Newest first (default)
+          break;
+      }
+    }
+
+    // Execute query with pagination and sorting
     const [ads, total] = await Promise.all([
       Ad.find(query)
         .populate('user', 'name email')
-        .sort({ createdAt: -1 }) // Sort newest first
+        .sort(sortOptions)
         .skip(skip)
         .limit(limitNum)
         .lean(),
@@ -166,7 +195,8 @@ export const getAds = async (req, res, next) => {
     // Calculate pagination metadata
     const pages = Math.ceil(total / limitNum);
 
-    res.json({
+    // Build response
+    const response = {
       success: true,
       ads,
       pagination: {
@@ -177,7 +207,24 @@ export const getAds = async (req, res, next) => {
         hasNext: pageNum < pages,
         hasPrev: pageNum > 1,
       },
-    });
+    };
+
+    // Add filters object for debugging in development only
+    if (process.env.NODE_ENV !== 'production') {
+      response.filters = {
+        search: searchTerm || null,
+        categorySlug: categorySlug ? categorySlug.trim() : null,
+        subCategorySlug: subCategorySlug ? subCategorySlug.trim() : null,
+        minPrice: minPrice ? parseFloat(minPrice) : null,
+        maxPrice: maxPrice ? parseFloat(maxPrice) : null,
+        currency: currency ? currency.trim() : null,
+        sort: sort ? sort.trim() : 'newest',
+        status: query.status,
+        isDeleted: query.isDeleted,
+      };
+    }
+
+    res.json(response);
   } catch (error) {
     next(error);
   }
