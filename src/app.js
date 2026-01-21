@@ -9,6 +9,7 @@ import favoritesRoutes from './routes/favorites.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import categoriesRoutes from './routes/categories.routes.js';
 import shareRoutes from './routes/share.routes.js';
+import integrationsRoutes from './routes/integrations.routes.js';
 import { errorHandler, notFound } from './middlewares/error.middleware.js';
 import { requestLogger } from './middlewares/logger.middleware.js';
 import { apiLimiter } from './middlewares/rateLimit.middleware.js';
@@ -135,6 +136,10 @@ app.use('/api/chats', apiLimiter, chatRoutes);
 // Share routes (public, no rate limiting needed)
 // GET /share/ads/:id - Share page with OpenGraph meta tags
 app.use('/share', shareRoutes);
+
+// Integrations routes (public, no rate limiting needed)
+// POST /api/integrations/make/test - Test Make webhook
+app.use('/api/integrations', integrationsRoutes);
 
 // Debug routes (development only)
 if (debugRoutes) {

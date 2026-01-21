@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import User from '../models/User.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { sendPasswordResetEmail } from '../services/email.service.js';
-import { sendForgotPasswordToMake } from '../services/makeWebhook.service.js';
+import { sendToMakeWebhook } from '../services/makeWebhook.service.js';
 
 /**
  * Generate JWT token for user
@@ -185,12 +185,17 @@ export const forgotPassword = async (req, res, next) => {
       console.log('[FORGOT] emailResult:', emailResult);
 
       // Send to Make webhook (awaited to guarantee delivery attempt)
+      // Payload: { event, email, resetUrl, timestamp, env }
       try {
-        const makeResult = await sendForgotPasswordToMake({
-          to: user.email,
-          name: user.name || '',
+        const makePayload = {
+          event: 'forgot_password',
+          email: user.email,
           resetUrl,
-        });
+          timestamp: new Date().toISOString(),
+          env: process.env.NODE_ENV || 'development',
+        };
+        
+        const makeResult = await sendToMakeWebhook(makePayload);
         console.log('[FORGOT] makeResult:', makeResult);
       } catch (error) {
         // Additional error handling (though service already handles it)
