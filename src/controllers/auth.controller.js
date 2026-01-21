@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import User from '../models/User.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { sendPasswordResetEmail } from '../services/email.service.js';
+import { sendForgotPasswordToMake } from '../services/makeWebhook.service.js';
 
 /**
  * Generate JWT token for user
@@ -178,6 +179,16 @@ export const forgotPassword = async (req, res, next) => {
       });
 
       console.log('[FORGOT] emailResult:', emailResult);
+
+      // Send to Make webhook (non-blocking, errors are logged but don't crash)
+      sendForgotPasswordToMake({
+        to: user.email,
+        name: user.name || '',
+        resetUrl,
+      }).catch((error) => {
+        // Additional error handling (though service already handles it)
+        console.error('[FORGOT] Make webhook error:', error.message);
+      });
     }
 
     // ALWAYS return 200 with same message to avoid user enumeration
