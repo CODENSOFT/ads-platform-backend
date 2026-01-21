@@ -23,7 +23,7 @@ const getWebhookUrl = () => {
  * @param {string} params.to - User email address
  * @param {string} params.name - User name (can be empty string)
  * @param {string} params.resetUrl - Password reset URL
- * @returns {Promise<void>} - Resolves when webhook is sent (or fails silently)
+ * @returns {Promise<{ok: boolean, status?: number, bodyPreview?: string}>} - Webhook response details
  */
 export async function sendForgotPasswordToMake({ to, name, resetUrl }) {
   const webhookUrl = getWebhookUrl();
@@ -41,8 +41,9 @@ export async function sendForgotPasswordToMake({ to, name, resetUrl }) {
     resetUrl: normalizedResetUrl,
   };
   
-  // Log attempt
-  console.log('[MAKE] sending forgot-password webhook to:', to);
+  // Log URL and payload
+  console.log('[MAKE] url:', webhookUrl);
+  console.log('[MAKE] payload:', JSON.stringify(payload, null, 2));
   
   // Create AbortController for timeout (8 seconds)
   const controller = new AbortController();
@@ -62,13 +63,25 @@ export async function sendForgotPasswordToMake({ to, name, resetUrl }) {
     // Clear timeout
     clearTimeout(timeoutId);
     
-    // Log response status
-    console.log('[MAKE] response:', response.status);
-    
-    // If non-2xx status, log error but don't throw
-    if (!response.ok) {
-      console.error('[MAKE] webhook returned non-2xx status:', response.status, response.statusText);
+    // Read response text safely (first 200 chars)
+    let bodyPreview = '';
+    try {
+      const responseText = await response.text();
+      bodyPreview = responseText.substring(0, 200);
+    } catch (textError) {
+      bodyPreview = '[Unable to read response body]';
     }
+    
+    // Log response status and body
+    console.log('[MAKE] status:', response.status);
+    console.log('[MAKE] body:', bodyPreview);
+    
+    // Return response details
+    return {
+      ok: response.ok,
+      status: response.status,
+      bodyPreview,
+    };
   } catch (error) {
     // Clear timeout if still pending
     clearTimeout(timeoutId);
@@ -76,8 +89,18 @@ export async function sendForgotPasswordToMake({ to, name, resetUrl }) {
     // Log error but don't throw (don't crash the request)
     if (error.name === 'AbortError') {
       console.error('[MAKE] webhook request timed out after 8 seconds');
+      return {
+        ok: false,
+        status: undefined,
+        bodyPreview: 'Request timeout after 8 seconds',
+      };
     } else {
       console.error('[MAKE] webhook request failed:', error.message);
+      return {
+        ok: false,
+        status: undefined,
+        bodyPreview: error.message || 'Unknown error',
+      };
     }
   }
 }

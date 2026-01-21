@@ -128,6 +128,8 @@ export const login = async (req, res, next) => {
  */
 export const forgotPassword = async (req, res, next) => {
   try {
+    console.log('[FORGOT] hit');
+    
     const { email } = req.body;
 
     // Validate email exists in body
@@ -170,6 +172,8 @@ export const forgotPassword = async (req, res, next) => {
       // Build reset URL (HashRouter compatible)
       const base = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
       resetUrl = `${base}/#/reset-password/${resetToken}`;
+      
+      console.log('[FORGOT] resetUrl:', resetUrl);
 
       // Send password reset email
       emailResult = await sendPasswordResetEmail({
@@ -180,15 +184,18 @@ export const forgotPassword = async (req, res, next) => {
 
       console.log('[FORGOT] emailResult:', emailResult);
 
-      // Send to Make webhook (non-blocking, errors are logged but don't crash)
-      sendForgotPasswordToMake({
-        to: user.email,
-        name: user.name || '',
-        resetUrl,
-      }).catch((error) => {
+      // Send to Make webhook (awaited to guarantee delivery attempt)
+      try {
+        const makeResult = await sendForgotPasswordToMake({
+          to: user.email,
+          name: user.name || '',
+          resetUrl,
+        });
+        console.log('[FORGOT] makeResult:', makeResult);
+      } catch (error) {
         // Additional error handling (though service already handles it)
         console.error('[FORGOT] Make webhook error:', error.message);
-      });
+      }
     }
 
     // ALWAYS return 200 with same message to avoid user enumeration

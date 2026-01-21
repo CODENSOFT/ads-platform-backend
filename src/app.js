@@ -14,6 +14,17 @@ import { requestLogger } from './middlewares/logger.middleware.js';
 import { apiLimiter } from './middlewares/rateLimit.middleware.js';
 import corsOptions from './config/cors.js';
 
+// Debug routes (imported but only mounted in development)
+// Using try-catch to gracefully handle if file doesn't exist
+let debugRoutes = null;
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    debugRoutes = (await import('./routes/debug.routes.js')).default;
+  } catch (error) {
+    console.warn('[DEBUG] Could not load debug routes:', error.message);
+  }
+}
+
 // Only load .env file in development (not required in production if env vars are provided)
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
@@ -124,6 +135,11 @@ app.use('/api/chats', apiLimiter, chatRoutes);
 // Share routes (public, no rate limiting needed)
 // GET /share/ads/:id - Share page with OpenGraph meta tags
 app.use('/share', shareRoutes);
+
+// Debug routes (development only)
+if (debugRoutes) {
+  app.use('/api/debug', debugRoutes);
+}
 
 // 404 handler - must be after all routes
 app.use(notFound);
