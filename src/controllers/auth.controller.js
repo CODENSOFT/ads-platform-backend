@@ -121,10 +121,21 @@ export const login = async (req, res, next) => {
 
 /**
  * Forgot password
- * - Validates email exists in body
+ * - Validates email exists in body (400 if missing)
+ * - Validates email format (400 if invalid)
  * - Finds user by email (case-insensitive)
- * - ALWAYS returns 200 with same message to avoid user enumeration
- * - If user exists: creates reset token and logs reset link
+ * - Returns 404 if user not found: { success:false, message:"No account found with this email", details:{type:"EMAIL_NOT_FOUND"} }
+ * - If user exists: creates reset token, sends email + Make webhook, returns 200 success
+ * 
+ * Postman example:
+ * POST /api/auth/forgot-password
+ * Body (JSON):
+ * {
+ *   "email": "user@example.com"
+ * }
+ * 
+ * Success (200): { success:true, message:"If the email exists, a reset link was sent.", meta:{...} }
+ * Not Found (404): { success:false, message:"No account found with this email", details:{type:"EMAIL_NOT_FOUND"} }
  */
 export const forgotPassword = async (req, res, next) => {
   try {
@@ -156,53 +167,8 @@ export const forgotPassword = async (req, res, next) => {
 
     console.log('[FORGOT] email exists:', !!user);
 
-    let emailResult = { delivered: false, provider: 'unknown' };
-    let resetUrl = null;
-
-    // If user exists, create reset token
-    if (user) {
-      console.log('[FORGOT] sending to:', user.email);
-
-      // Generate reset token (returns raw token)
-      const resetToken = user.createPasswordResetToken();
-
-      // Save user with validateBeforeSave:false to skip validation
-      await user.save({ validateBeforeSave: false });
-
-      // Build reset URL (HashRouter compatible)
-      const base = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
-      resetUrl = `${base}/#/reset-password/${resetToken}`;
-      
-      console.log('[FORGOT] resetUrl:', resetUrl);
-
-      // Send password reset email
-      emailResult = await sendPasswordResetEmail({
-        to: user.email,
-        name: user.name,
-        resetUrl,
-      });
-
-      console.log('[FORGOT] emailResult:', emailResult);
-
-      // Send to Make webhook (awaited to guarantee delivery attempt)
-      // Payload: { event, email, resetUrl, timestamp, env }
-      try {
-        const makePayload = {
-          event: 'forgot_password',
-          email: user.email,
-          resetUrl,
-          timestamp: new Date().toISOString(),
-          env: process.env.NODE_ENV || 'development',
-        };
-        
-        const makeResult = await sendToMakeWebhook(makePayload);
-        console.log('[FORGOT] makeResult:', makeResult);
-        console.log('[MAKE] delivered:', makeResult);
-      } catch (error) {
-        // Additional error handling (though service already handles it)
-        console.error('[FORGOT] Make webhook error:', error.message);
-      }
-    } else {
+    // If user not found, return 404 error
+    if (!user) {
       // User doesn't exist - check if we should send debug event (dev only)
       const shouldSendDebug = 
         process.env.NODE_ENV !== 'production' && 
@@ -224,9 +190,61 @@ export const forgotPassword = async (req, res, next) => {
           console.error('[FORGOT] Make webhook debug error:', error.message);
         }
       }
+      
+      // Return 404 error immediately
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with this email',
+        details: {
+          type: 'EMAIL_NOT_FOUND',
+        },
+      });
     }
 
-    // ALWAYS return 200 with same message to avoid user enumeration
+    // User exists - create reset token and send email
+    console.log('[FORGOT] sending to:', user.email);
+
+    // Generate reset token (returns raw token)
+    const resetToken = user.createPasswordResetToken();
+
+    // Save user with validateBeforeSave:false to skip validation
+    await user.save({ validateBeforeSave: false });
+
+    // Build reset URL (HashRouter compatible)
+    const base = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    const resetUrl = `${base}/#/reset-password/${resetToken}`;
+    
+    console.log('[FORGOT] resetUrl:', resetUrl);
+
+    // Send password reset email
+    const emailResult = await sendPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      resetUrl,
+    });
+
+    console.log('[FORGOT] emailResult:', emailResult);
+
+    // Send to Make webhook (awaited to guarantee delivery attempt)
+    // Payload: { event, email, resetUrl, timestamp, env }
+    try {
+      const makePayload = {
+        event: 'forgot_password',
+        email: user.email,
+        resetUrl,
+        timestamp: new Date().toISOString(),
+        env: process.env.NODE_ENV || 'development',
+      };
+      
+      const makeResult = await sendToMakeWebhook(makePayload);
+      console.log('[FORGOT] makeResult:', makeResult);
+      console.log('[MAKE] delivered:', makeResult);
+    } catch (error) {
+      // Additional error handling (though service already handles it)
+      console.error('[FORGOT] Make webhook error:', error.message);
+    }
+
+    // Return success response
     res.status(200).json({
       success: true,
       message: 'If the email exists, a reset link was sent.',
