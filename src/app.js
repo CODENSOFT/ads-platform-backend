@@ -132,14 +132,14 @@ app.use('/api/ads', apiLimiter, adsRoutes);
 app.use('/api/favorites', apiLimiter, favoritesRoutes);
 
 // Chat routes
-// GET /api/chats/unread-count - Get unread count (protected) - uses readLimiter (120/min)
-// GET /api/chats - Get all conversations for current user (protected) - uses readLimiter (120/min)
-// GET /api/chats/:id/messages - Get messages for a conversation (protected) - uses readLimiter (120/min)
-// POST /api/chats/start - Start or get existing conversation (protected) - uses writeLimiter (40/15min)
-// POST /api/chats/:id/messages - Send a message in a conversation (protected) - uses writeLimiter (40/15min)
-// Note: apiLimiter automatically applies readLimiter for GET, writeLimiter for POST
+// GET /api/chats/unread-count - Get unread count (protected) - NO rate limiting
+// GET /api/chats - Get all conversations for current user (protected) - NO rate limiting
+// GET /api/chats/:id/messages - Get messages for a conversation (protected) - NO rate limiting
+// POST /api/chats/start - Start or get existing conversation (protected) - rate limited (writeLimiter)
+// POST /api/chats/:id/messages - Send a message in a conversation (protected) - rate limited (writeLimiter)
+// Note: Rate limiting is applied only to POST routes in chat.routes.js
 // IMPORTANT: Mount chat routes BEFORE 404 handler
-app.use('/api/chats', apiLimiter, chatRoutes);
+app.use('/api/chats', chatRoutes);
 
 // Share routes (public, no rate limiting needed)
 // GET /share/ads/:id - Share page with OpenGraph meta tags

@@ -7,30 +7,13 @@ import {
   unreadCount,
 } from '../controllers/chat.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
+import { apiLimiter } from '../middlewares/rateLimit.middleware.js';
 
 const router = express.Router();
-
-// All routes require authentication
-router.use(protect);
 
 // Debug: Log route registration (development only)
 if (process.env.NODE_ENV !== 'production') {
   console.log('[CHAT ROUTES] Registering chat routes...');
-}
-
-/**
- * @route   POST /api/chats/start
- * @desc    Start or get existing chat for an ad
- * @access  Private
- * @middleware protect - JWT authentication required
- * 
- * IMPORTANT: This route MUST be defined before /:id routes to avoid route conflicts
- */
-router.post('/start', startChat);
-
-// Debug: Log route registration (development only)
-if (process.env.NODE_ENV !== 'production') {
-  console.log('[CHAT ROUTES] POST /api/chats/start registered');
 }
 
 /**
@@ -41,7 +24,7 @@ if (process.env.NODE_ENV !== 'production') {
  * 
  * IMPORTANT: This route MUST be defined before /:id routes to avoid route conflicts
  */
-router.get('/unread-count', unreadCount);
+router.get('/unread-count', protect, unreadCount);
 
 /**
  * @route   GET /api/chats
@@ -49,7 +32,7 @@ router.get('/unread-count', unreadCount);
  * @access  Private
  * @middleware protect - JWT authentication required
  */
-router.get('/', getChats);
+router.get('/', protect, getChats);
 
 /**
  * @route   GET /api/chats/:id/messages
@@ -57,14 +40,24 @@ router.get('/', getChats);
  * @access  Private
  * @middleware protect - JWT authentication required
  */
-router.get('/:id/messages', getMessages);
+router.get('/:id/messages', protect, getMessages);
+
+/**
+ * @route   POST /api/chats/start
+ * @desc    Start or get existing chat for an ad
+ * @access  Private
+ * @middleware protect - JWT authentication required, apiLimiter - rate limited
+ * 
+ * IMPORTANT: This route MUST be defined before /:id routes to avoid route conflicts
+ */
+router.post('/start', protect, apiLimiter, startChat);
 
 /**
  * @route   POST /api/chats/:id/messages
  * @desc    Send a message in a chat
  * @access  Private
- * @middleware protect - JWT authentication required
+ * @middleware protect - JWT authentication required, apiLimiter - rate limited
  */
-router.post('/:id/messages', sendMessage);
+router.post('/:id/messages', protect, apiLimiter, sendMessage);
 
 export default router;
