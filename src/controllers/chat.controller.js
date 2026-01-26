@@ -120,59 +120,60 @@ export const startChat = async (req, res, next) => {
       });
     }
 
-    // Extract and validate receiverId
+    // Extract receiverId and adId (support both adId and ad fields)
     const receiverId = req.body.receiverId;
-    
-    // Extract ad/adId with fallback - prioritize 'ad' field as per user requirement
-    const adRaw = req.body.ad ?? req.body.adId;
+    const adIdRaw = req.body.adId ?? req.body.ad;
     
     // Log for debugging (dev only)
     if (process.env.NODE_ENV !== 'production') {
       console.log('[CHAT_START] Processing:', {
         userId: req.user.id,
         receiverId,
-        ad: adRaw,
+        adId: adIdRaw,
         bodyKeys: Object.keys(req.body),
       });
     }
 
-    // Validate receiverId
-    if (!receiverId) {
+    // Validate receiverId - required, non-empty string
+    if (!receiverId || (typeof receiverId === 'string' && receiverId.trim() === '')) {
       console.log('[CHAT_START] 400: receiverId is required');
       return res.status(400).json({
         success: false,
-        message: 'receiverId is required',
+        message: 'receiverId is required and must be a non-empty string',
         details: {
+          type: 'VALIDATION_ERROR',
           field: 'receiverId',
         },
       });
     }
 
-    // Validate ad field - must be present and not null/undefined
-    if (adRaw === null || adRaw === undefined || adRaw === 'null' || adRaw === 'undefined') {
-      console.log('[CHAT_START] 400: Field ad is required', { ad: adRaw });
+    // Validate adId - required, non-empty string
+    if (!adIdRaw || adIdRaw === null || adIdRaw === undefined || 
+        (typeof adIdRaw === 'string' && adIdRaw.trim() === '') ||
+        adIdRaw === 'null' || adIdRaw === 'undefined') {
+      console.log('[CHAT_START] 400: adId is required', { adId: adIdRaw });
       return res.status(400).json({
         success: false,
-        message: "Field 'ad' is required",
+        message: 'adId is required and must be a non-empty string',
         details: {
-          field: 'ad',
-          value: adRaw,
+          type: 'VALIDATION_ERROR',
+          field: 'adId',
         },
       });
     }
 
-    // Trim if string
-    const adId = typeof adRaw === 'string' ? adRaw.trim() : adRaw;
+    // Trim if string and normalize
+    const adId = typeof adIdRaw === 'string' ? adIdRaw.trim() : adIdRaw;
     
-    // Validate adId is not empty after trim
+    // Double-check after trim
     if (!adId || adId === '') {
-      console.log('[CHAT_START] 400: Field ad is required (empty)', { ad: adRaw });
+      console.log('[CHAT_START] 400: adId is required (empty after trim)', { adId: adIdRaw });
       return res.status(400).json({
         success: false,
-        message: "Field 'ad' is required",
+        message: 'adId is required and must be a non-empty string',
         details: {
-          field: 'ad',
-          value: adRaw,
+          type: 'VALIDATION_ERROR',
+          field: 'adId',
         },
       });
     }
@@ -184,21 +185,21 @@ export const startChat = async (req, res, next) => {
         success: false,
         message: 'Invalid receiverId format',
         details: {
+          type: 'INVALID_ID',
           field: 'receiverId',
-          value: receiverId,
         },
       });
     }
 
     // Validate adId is valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(adId)) {
-      console.log('[CHAT_START] 400: Invalid ad id', { ad: adId });
+      console.log('[CHAT_START] 400: Invalid adId format', { adId });
       return res.status(400).json({
         success: false,
-        message: 'Invalid ad id',
+        message: 'Invalid adId format',
         details: {
-          field: 'ad',
-          value: adId,
+          type: 'INVALID_ID',
+          field: 'adId',
         },
       });
     }
@@ -262,9 +263,17 @@ export const startChat = async (req, res, next) => {
     const me = req.user.id;
     const participants = [me, receiverId].sort();
 
+    // One-time cleanup guard: Check for existing chats with ad: null and log warning
+    // (Do NOT delete automatically, just log)
+    const nullChatsCount = await Chat.countDocuments({ ad: null });
+    if (nullChatsCount > 0) {
+      console.warn(`[CHAT_START] WARNING: Found ${nullChatsCount} chat(s) with ad: null in database. These will be ignored in queries.`);
+    }
+
     // Find existing chat for this ad and participants
+    // IMPORTANT: Always use a real adId, NEVER query with ad: null
     let chat = await Chat.findOne({
-      ad: adObjectId,
+      ad: adObjectId, // Always use real adId, never null
       participants: { $all: participants, $size: 2 },
     });
 
@@ -354,19 +363,21 @@ export const startChat = async (req, res, next) => {
       try {
         const currentUserId = req.user?._id;
         const receiverId = req.body.receiverId;
-        const adRaw = req.body.ad ?? req.body.adId;
+        const adIdRaw = req.body.adId ?? req.body.ad;
 
-        if (currentUserId && receiverId && adRaw && 
+        // Validate all required fields and ObjectId format
+        if (currentUserId && receiverId && adIdRaw && 
             mongoose.Types.ObjectId.isValid(receiverId) && 
-            mongoose.Types.ObjectId.isValid(adRaw)) {
+            mongoose.Types.ObjectId.isValid(adIdRaw)) {
           const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
           const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
-          const adObjectId = new mongoose.Types.ObjectId(adRaw);
+          const adObjectId = new mongoose.Types.ObjectId(adIdRaw);
           const participants = [currentUserObjectId.toString(), receiverObjectId.toString()].sort();
 
           // Find existing chat with same ad and participants
+          // IMPORTANT: Always use a real adId, NEVER query with ad: null
           const existingChat = await Chat.findOne({
-            ad: adObjectId,
+            ad: adObjectId, // Always use real adId, never null
             participants: { $all: participants, $size: 2 },
           });
 
