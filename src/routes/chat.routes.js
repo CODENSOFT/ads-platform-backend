@@ -5,6 +5,7 @@ import {
   getMessages,
   sendMessage,
   unreadCount,
+  deleteChat,
 } from '../controllers/chat.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 import { apiLimiter } from '../middlewares/rateLimit.middleware.js';
@@ -59,5 +60,16 @@ router.post('/start', protect, apiLimiter, startChat);
  * @middleware protect - JWT authentication required, apiLimiter - rate limited
  */
 router.post('/:id/messages', protect, apiLimiter, sendMessage);
+
+/**
+ * @route   DELETE /api/chats/:id
+ * @desc    Delete a chat and all its messages
+ * @access  Private
+ * @middleware protect - JWT authentication required, apiLimiter - rate limited
+ * 
+ * Only participants can delete a chat.
+ * This will delete all messages in the chat as well.
+ */
+router.delete('/:id', protect, apiLimiter, deleteChat);
 
 export default router;
