@@ -11,6 +11,7 @@ import {
   setAdCover,
 } from '../controllers/ads.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
+import { apiLimiter } from '../middlewares/rateLimit.middleware.js';
 import { validateUpdateStatus } from '../middlewares/validate.middleware.js';
 import { validateCreateAd } from '../middlewares/validateAd.middleware.js';
 import { validateAdUpdate } from '../middlewares/validateAdUpdate.middleware.js';
@@ -71,6 +72,7 @@ router.get('/:id', getAdById);
 router.post(
   '/',
   protect,
+  apiLimiter,
   uploadImages,
   uploadToCloudinary(true), // Images required for creation
   validateCreateAd,
@@ -87,7 +89,7 @@ router.post(
  * 
  * NOTE: This route MUST be before /:id to be matched correctly
  */
-router.patch('/:id/status', protect, checkAdOwnership, validateUpdateStatus, updateAdStatus);
+router.patch('/:id/status', protect, apiLimiter, checkAdOwnership, validateUpdateStatus, updateAdStatus);
 
 /**
  * @route   PATCH /api/ads/:id/cover
@@ -100,7 +102,7 @@ router.patch('/:id/status', protect, checkAdOwnership, validateUpdateStatus, upd
  * 
  * NOTE: This route MUST be before /:id to be matched correctly
  */
-router.patch('/:id/cover', protect, checkAdOwnership, setAdCover);
+router.patch('/:id/cover', protect, apiLimiter, checkAdOwnership, setAdCover);
 
 /**
  * @route   PATCH /api/ads/:id
@@ -117,6 +119,7 @@ router.patch('/:id/cover', protect, checkAdOwnership, setAdCover);
 router.patch(
   '/:id',
   protect,
+  apiLimiter,
   checkAdOwnership,
   validateAdUpdate,
   updateAd
@@ -133,7 +136,7 @@ router.patch(
  * 
  * NOTE: This route MUST be before /:id to be matched correctly
  */
-router.delete('/:id/images', protect, checkAdOwnership, deleteAdImage);
+router.delete('/:id/images', protect, apiLimiter, checkAdOwnership, deleteAdImage);
 
 /**
  * @route   DELETE /api/ads/:id
@@ -142,7 +145,7 @@ router.delete('/:id/images', protect, checkAdOwnership, deleteAdImage);
  * @middleware protect - JWT authentication required
  * @middleware checkAdOwnership - Only ad owner can delete
  */
-router.delete('/:id', protect, checkAdOwnership, deleteAd);
+router.delete('/:id', protect, apiLimiter, checkAdOwnership, deleteAd);
 
 export default router;
 

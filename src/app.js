@@ -115,21 +115,21 @@ app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoriesRoutes);
 
 // Ads routes
-// GET /api/ads - List ads (with filters, pagination) - uses readLimiter (120/min)
-// GET /api/ads/:id - Get ad by ID - uses readLimiter (120/min)
-// POST /api/ads - Create ad (protected) - uses writeLimiter (40/15min)
-// PATCH /api/ads/:id/status - Update ad status (protected) - uses writeLimiter (40/15min)
-// DELETE /api/ads/:id - Delete ad (protected) - uses writeLimiter (40/15min)
-// Note: apiLimiter automatically applies readLimiter for GET, writeLimiter for POST/PATCH/DELETE
-app.use('/api/ads', apiLimiter, adsRoutes);
+// GET /api/ads - List ads (with filters, pagination) - NO rate limiting
+// GET /api/ads/:id - Get ad by ID - NO rate limiting
+// POST /api/ads - Create ad (protected) - rate limited (writeLimiter)
+// PATCH /api/ads/:id/status - Update ad status (protected) - rate limited (writeLimiter)
+// DELETE /api/ads/:id - Delete ad (protected) - rate limited (writeLimiter)
+// Note: Rate limiting is applied only to write operations in ads.routes.js
+app.use('/api/ads', adsRoutes);
 
 // Favorites routes
-// GET /api/favorites/my - Get current user's favorite ads (protected) - uses readLimiter (120/min)
-// GET /api/favorites - Get user's favorite ads (protected) - uses readLimiter (120/min)
-// POST /api/favorites/:adId - Add ad to favorites (protected) - uses writeLimiter (40/15min)
-// DELETE /api/favorites/:adId - Remove ad from favorites (protected) - uses writeLimiter (40/15min)
-// Note: apiLimiter automatically applies readLimiter for GET, writeLimiter for POST/DELETE
-app.use('/api/favorites', apiLimiter, favoritesRoutes);
+// GET /api/favorites/my - Get current user's favorite ads (protected) - NO rate limiting
+// GET /api/favorites - Get user's favorite ads (protected) - NO rate limiting
+// POST /api/favorites/:adId - Add ad to favorites (protected) - rate limited (writeLimiter)
+// DELETE /api/favorites/:adId - Remove ad from favorites (protected) - rate limited (writeLimiter)
+// Note: Rate limiting is applied only to write operations in favorites.routes.js
+app.use('/api/favorites', favoritesRoutes);
 
 // Chat routes
 // GET /api/chats/unread-count - Get unread count (protected) - NO rate limiting
