@@ -37,6 +37,10 @@ const startServer = async () => {
     const { migrateChatsToUserPair } = await import('./scripts/migrateChatsToUserPair.js');
     await migrateChatsToUserPair();
 
+    // Cleanup broken chats (null user1/user2, invalid participants) and drop wrong unique indexes
+    const { cleanupBrokenChats } = await import('./scripts/cleanupBrokenChats.js');
+    await cleanupBrokenChats();
+
     // Start Express server only if DB connection is successful
     // Listen on 0.0.0.0 to accept connections from Railway
     app.listen(PORT, '0.0.0.0', () => {

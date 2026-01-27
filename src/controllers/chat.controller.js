@@ -181,41 +181,9 @@ export const startChat = async (req, res, next) => {
     const user1Id = new mongoose.Types.ObjectId(a);
     const user2Id = new mongoose.Types.ObjectId(b);
 
-    // Find existing chat by canonical user1/user2 pair
-    let chat = await Chat.findOne({
-      user1: user1Id,
-      user2: user2Id,
-    });
-
-    if (chat) {
-      // Populate participants (name, email)
-      await chat.populate('participants', 'name email');
-      
-      // Log in dev mode
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[CHAT_START] Found existing chat:', {
-          chatId: chat._id.toString(),
-          userId: req.user.id,
-          receiverId,
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Chat already exists',
-        chat: {
-          _id: chat._id,
-          participants: chat.participants,
-          lastMessage: chat.lastMessage,
-          createdAt: chat.createdAt,
-          updatedAt: chat.updatedAt,
-        },
-      });
-    }
-
-    // Create new chat with canonical user1/user2
-    // Pre-validate hook will also set these, but set explicitly for clarity
-    chat = await Chat.create({
+    // Create new chat ALWAYS (unlimited chats allowed between same users)
+    // Pre-validate hook will validate and set user1/user2
+    const chat = await Chat.create({
       participants: [user1Id, user2Id],
       user1: user1Id,
       user2: user2Id,
@@ -268,79 +236,7 @@ export const startChat = async (req, res, next) => {
       );
     }
 
-    // If it's a duplicate key error, try to find existing chat
-    if (error.code === 11000) {
-      try {
-        const receiverIdRaw = req.body.receiverId;
-        const currentUserId = req.user?.id || req.user?._id;
-
-        // SAFE: Validate receiverId and currentUserId
-        if (!receiverIdRaw || !currentUserId ||
-            !mongoose.Types.ObjectId.isValid(receiverIdRaw) ||
-            !mongoose.Types.ObjectId.isValid(currentUserId)) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('[CHAT_START] 400: Duplicate key error but IDs invalid', {
-              hasReceiverId: !!receiverIdRaw,
-              hasCurrentUserId: !!currentUserId,
-            });
-          }
-          return res.status(400).json({
-            success: false,
-            message: 'Validation failed',
-            details: {
-              type: 'VALIDATION_ERROR',
-              error: 'Duplicate key error with invalid input',
-            },
-          });
-        }
-
-        // All IDs are valid, convert to ObjectIds
-        const receiverObjectId = new mongoose.Types.ObjectId(receiverIdRaw);
-        const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
-        
-        // Build sorted pair (canonical order for user1/user2)
-        const [a, b] = [currentUserObjectId.toString(), receiverObjectId.toString()].sort();
-        const user1Id = new mongoose.Types.ObjectId(a);
-        const user2Id = new mongoose.Types.ObjectId(b);
-
-        // Find existing chat by canonical user1/user2 pair
-        const existingChat = await Chat.findOne({
-          user1: user1Id,
-          user2: user2Id,
-        });
-
-        if (existingChat) {
-          await existingChat.populate('participants', 'name email');
-          
-          // Log in dev mode
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('[CHAT_START] Duplicate key - found existing chat:', {
-              chatId: existingChat._id.toString(),
-              userId: currentUserId.toString(),
-              receiverId: receiverIdRaw,
-            });
-          }
-
-          return res.status(200).json({
-            success: true,
-            message: 'Chat already exists',
-            chat: {
-              _id: existingChat._id,
-              participants: existingChat.participants,
-              lastMessage: existingChat.lastMessage,
-              createdAt: existingChat.createdAt,
-              updatedAt: existingChat.updatedAt,
-            },
-          });
-        }
-      } catch (retryError) {
-        // If retry fails, pass original error
-        logger.error('[CHAT_START_RETRY_ERROR]', {
-          message: retryError.message,
-          originalError: error.message,
-        });
-      }
-    }
+    // No duplicate key handling needed - unlimited chats allowed (no unique constraints)
 
     // Pass error to error handler middleware
     return next(error);

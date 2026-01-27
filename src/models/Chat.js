@@ -48,17 +48,30 @@ const chatSchema = new mongoose.Schema(
   }
 );
 
-// Pre-validate hook: Sort participants and set user1/user2 for canonical uniqueness
+// Pre-validate hook: Sort participants and set user1/user2 (validate no nulls)
 chatSchema.pre('validate', function (next) {
-  if (!this.participants || this.participants.length !== 2) {
+  // Ensure participants exists and length === 2
+  if (!this.participants || !Array.isArray(this.participants) || this.participants.length !== 2) {
     return next(new mongoose.Error.ValidationError('Chat must have exactly 2 participants'));
   }
 
-  // Convert to strings and sort lexicographically
-  const sorted = [
-    this.participants[0].toString(),
-    this.participants[1].toString(),
-  ].sort();
+  // Convert to strings, trim, and validate
+  let sorted = [
+    this.participants[0]?.toString()?.trim(),
+    this.participants[1]?.toString()?.trim(),
+  ];
+
+  // Check if any is missing/invalid
+  if (!sorted[0] || !sorted[1] || 
+      sorted[0] === 'null' || sorted[1] === 'null' ||
+      sorted[0] === 'undefined' || sorted[1] === 'undefined' ||
+      !mongoose.Types.ObjectId.isValid(sorted[0]) ||
+      !mongoose.Types.ObjectId.isValid(sorted[1])) {
+    return next(new mongoose.Error.ValidationError('Invalid participant IDs'));
+  }
+
+  // Sort lexicographically
+  sorted = sorted.sort();
 
   // Prevent self-chat (same user twice)
   if (sorted[0] === sorted[1]) {
@@ -71,7 +84,7 @@ chatSchema.pre('validate', function (next) {
     new mongoose.Types.ObjectId(sorted[1]),
   ];
 
-  // Set canonical user1 and user2 (always sorted)
+  // Set canonical user1 and user2 (always sorted, never null)
   this.user1 = new mongoose.Types.ObjectId(sorted[0]);
   this.user2 = new mongoose.Types.ObjectId(sorted[1]);
 
@@ -97,12 +110,9 @@ chatSchema.pre('save', function (next) {
   next();
 });
 
-// Indexes for efficient queries
-chatSchema.index({ participants: 1 }); // For backward compatibility queries
-chatSchema.index({ user1: 1 });
-chatSchema.index({ user2: 1 });
-// Unique compound index: only ONE chat per user pair (canonical order)
-chatSchema.index({ user1: 1, user2: 1 }, { unique: true });
+// Indexes for efficient queries (NOT unique - allows unlimited chats)
+chatSchema.index({ participants: 1 });
+chatSchema.index({ user1: 1, user2: 1 });
 
 const Chat = mongoose.model('Chat', chatSchema);
 
