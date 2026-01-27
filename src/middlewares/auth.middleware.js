@@ -21,11 +21,11 @@ export const protect = async (req, res, next) => {
 
   // Case 1: No token provided
   if (!token) {
-    return next(
-      new AppError('Authentication required. Please provide a valid token', 401, {
-        type: 'NO_TOKEN',
-      })
-    );
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required',
+      details: { type: 'AUTH_REQUIRED' },
+    });
   }
 
   try {
@@ -45,11 +45,11 @@ export const protect = async (req, res, next) => {
     const user = await User.findById(decoded.id).select('-password');
     
     if (!user) {
-      return next(
-        new AppError('User no longer exists', 401, {
-          type: 'USER_NOT_FOUND',
-        })
-      );
+      return res.status(401).json({
+        success: false,
+        message: 'Token invalid or expired',
+        details: { type: 'TOKEN_INVALID' },
+      });
     }
 
     // Attach user to request object with STRICT structure
@@ -65,30 +65,21 @@ export const protect = async (req, res, next) => {
     
     next();
   } catch (error) {
-    // Case 2: Token expired
-    if (error instanceof jwt.TokenExpiredError) {
-      return next(
-        new AppError('Token expired. Please login again', 401, {
-          type: 'TOKEN_EXPIRED',
-        })
-      );
-    }
-
-    // Case 3: Invalid token (malformed, wrong signature, etc.)
-    if (error instanceof jwt.JsonWebTokenError) {
-      return next(
-        new AppError('Invalid token. Please login again', 401, {
-          type: 'INVALID_TOKEN',
-        })
-      );
+    // Case 2: Token expired or invalid (malformed, wrong signature, etc.)
+    if (error instanceof jwt.TokenExpiredError || error instanceof jwt.JsonWebTokenError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token invalid or expired',
+        details: { type: 'TOKEN_INVALID' },
+      });
     }
 
     // Other unexpected errors
-    return next(
-      new AppError('Authentication failed. Please login again', 401, {
-        type: 'AUTH_ERROR',
-      })
-    );
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication failed',
+      details: { type: 'AUTH_ERROR' },
+    });
   }
 };
 
