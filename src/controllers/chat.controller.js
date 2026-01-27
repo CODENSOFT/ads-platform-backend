@@ -440,7 +440,7 @@ export const deleteChat = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'Chat not found',
-        details: { type: 'NOT_FOUND', resource: 'Chat' },
+        details: { type: 'NOT_FOUND' },
       });
     }
 
@@ -449,20 +449,36 @@ export const deleteChat = async (req, res, next) => {
     if (!isParticipant) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied. You are not a participant in this chat',
+        message: 'Access denied',
         details: { type: 'FORBIDDEN' },
       });
     }
 
-    console.log('[CHAT_DELETE] user:', me, 'chat:', chatId);
+    // Log only in development
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[CHAT_DELETE] user:', me, 'chat:', chatId);
+    }
 
-    // Delete messages first
-    await Message.deleteMany({ chat: chat._id });
+    // Delete all messages belonging to this chat
+    const messagesResult = await Message.deleteMany({ chat: chat._id });
+    const messagesDeleted = messagesResult.deletedCount;
 
     // Delete chat
     await Chat.findByIdAndDelete(chat._id);
 
-    return res.status(200).json({ success: true, message: 'Chat deleted' });
+    // Log only in development
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[CHAT_DELETE] Deleted chat and', messagesDeleted, 'messages');
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Chat deleted',
+      deleted: {
+        chatId: chatId,
+        messagesDeleted: messagesDeleted,
+      },
+    });
   } catch (err) {
     return next(err);
   }
