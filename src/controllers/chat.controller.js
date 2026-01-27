@@ -121,9 +121,9 @@ export const startChat = async (req, res, next) => {
       });
     }
 
-    // Normalize IDs early
+    // Extract IDs - ONLY accept req.body.adId (no fallback to req.body.ad)
     const receiverIdRaw = req.body.receiverId;
-    const adIdRaw = req.body.adId ?? req.body.ad;
+    const adIdRaw = req.body.adId;
     
     // Log for debugging (dev only)
     if (process.env.NODE_ENV !== 'production') {
@@ -135,23 +135,34 @@ export const startChat = async (req, res, next) => {
       });
     }
 
-    // Strict validation: receiverId - required, non-empty string
-    if (!receiverIdRaw || (typeof receiverIdRaw === 'string' && receiverIdRaw.trim() === '')) {
-      console.log('[CHAT_START] 400: receiverId is required');
+    // STRICT VALIDATION AT THE TOP - BEFORE ANY DB OPERATIONS
+    
+    // Validate receiverId: required, non-empty string, not "null"/"undefined"
+    if (!receiverIdRaw || 
+        receiverIdRaw === null || 
+        receiverIdRaw === undefined ||
+        (typeof receiverIdRaw === 'string' && receiverIdRaw.trim() === '') ||
+        receiverIdRaw === 'null' || 
+        receiverIdRaw === 'undefined') {
+      console.log('[CHAT_START] 400: receiverId is required', { receiverId: receiverIdRaw });
       return res.status(400).json({
         success: false,
         message: 'receiverId is required and must be a non-empty string',
         details: {
           type: 'VALIDATION_ERROR',
           field: 'receiverId',
+          value: receiverIdRaw,
         },
       });
     }
 
-    // Strict validation: adId - required, non-empty string
-    if (!adIdRaw || adIdRaw === null || adIdRaw === undefined || 
+    // Validate adId: required, non-empty string, not "null"/"undefined"
+    if (!adIdRaw || 
+        adIdRaw === null || 
+        adIdRaw === undefined ||
         (typeof adIdRaw === 'string' && adIdRaw.trim() === '') ||
-        adIdRaw === 'null' || adIdRaw === 'undefined') {
+        adIdRaw === 'null' || 
+        adIdRaw === 'undefined') {
       console.log('[CHAT_START] 400: adId is required', { adId: adIdRaw });
       return res.status(400).json({
         success: false,
@@ -159,40 +170,16 @@ export const startChat = async (req, res, next) => {
         details: {
           type: 'VALIDATION_ERROR',
           field: 'adId',
+          value: adIdRaw,
         },
       });
     }
 
-    // Trim if string and normalize
+    // Trim if string
     const receiverId = typeof receiverIdRaw === 'string' ? receiverIdRaw.trim() : receiverIdRaw;
     const adId = typeof adIdRaw === 'string' ? adIdRaw.trim() : adIdRaw;
     
-    // Double-check after trim
-    if (!receiverId || receiverId === '') {
-      console.log('[CHAT_START] 400: receiverId is required (empty after trim)', { receiverId: receiverIdRaw });
-      return res.status(400).json({
-        success: false,
-        message: 'receiverId is required and must be a non-empty string',
-        details: {
-          type: 'VALIDATION_ERROR',
-          field: 'receiverId',
-        },
-      });
-    }
-
-    if (!adId || adId === '') {
-      console.log('[CHAT_START] 400: adId is required (empty after trim)', { adId: adIdRaw });
-      return res.status(400).json({
-        success: false,
-        message: 'adId is required and must be a non-empty string',
-        details: {
-          type: 'VALIDATION_ERROR',
-          field: 'adId',
-        },
-      });
-    }
-
-    // Validate receiverId is valid ObjectId
+    // Validate ObjectId format for receiverId
     if (!mongoose.Types.ObjectId.isValid(receiverId)) {
       console.log('[CHAT_START] 400: Invalid receiverId format', { receiverId });
       return res.status(400).json({
@@ -201,11 +188,12 @@ export const startChat = async (req, res, next) => {
         details: {
           type: 'INVALID_ID',
           field: 'receiverId',
+          value: receiverIdRaw,
         },
       });
     }
 
-    // Validate adId is valid ObjectId
+    // Validate ObjectId format for adId
     if (!mongoose.Types.ObjectId.isValid(adId)) {
       console.log('[CHAT_START] 400: Invalid adId format', { adId });
       return res.status(400).json({
@@ -214,11 +202,13 @@ export const startChat = async (req, res, next) => {
         details: {
           type: 'INVALID_ID',
           field: 'adId',
+          value: adIdRaw,
         },
       });
     }
 
-    // Convert to ObjectIds
+    // Convert to ObjectIds ONLY after validation passes
+    // This ensures we NEVER create ObjectId from null/invalid values
     const adObjectId = new mongoose.Types.ObjectId(adId);
     const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
     const meObjectId = new mongoose.Types.ObjectId(req.user.id);
@@ -380,18 +370,41 @@ export const startChat = async (req, res, next) => {
     // If it's a duplicate key error, try to find existing chat
     if (error.code === 11000) {
       try {
-        const currentUserId = req.user?._id;
+        // Read adId ONLY from req.body.adId (no fallback)
+        const adIdRaw = req.body.adId;
         const receiverIdRaw = req.body.receiverId;
-        const adIdRaw = req.body.adId ?? req.body.ad;
+        const currentUserId = req.user?.id || req.user?._id;
 
-        // If any id missing/invalid -> do not retry lookup; just return 400 with VALIDATION_ERROR
-        if (!currentUserId || !receiverIdRaw || !adIdRaw ||
-            !mongoose.Types.ObjectId.isValid(receiverIdRaw) || 
+        // SAFE: If adId missing/invalid -> return 400 and STOP (do not attempt DB lookup)
+        if (!adIdRaw || 
+            adIdRaw === null || 
+            adIdRaw === undefined ||
+            adIdRaw === 'null' || 
+            adIdRaw === 'undefined' ||
             !mongoose.Types.ObjectId.isValid(adIdRaw)) {
-          console.log('[CHAT_START] 400: Duplicate key error but missing/invalid IDs', {
-            hasCurrentUserId: !!currentUserId,
+          console.log('[CHAT_START] 400: Duplicate key error but adId missing/invalid', {
+            adId: adIdRaw,
             hasReceiverId: !!receiverIdRaw,
-            hasAdId: !!adIdRaw,
+            hasCurrentUserId: !!currentUserId,
+          });
+          return res.status(400).json({
+            success: false,
+            message: 'adId is required and must be a valid ObjectId',
+            details: {
+              type: 'VALIDATION_ERROR',
+              field: 'adId',
+              value: adIdRaw,
+            },
+          });
+        }
+
+        // SAFE: Validate receiverId and currentUserId
+        if (!receiverIdRaw || !currentUserId ||
+            !mongoose.Types.ObjectId.isValid(receiverIdRaw) ||
+            !mongoose.Types.ObjectId.isValid(currentUserId)) {
+          console.log('[CHAT_START] 400: Duplicate key error but IDs invalid', {
+            hasReceiverId: !!receiverIdRaw,
+            hasCurrentUserId: !!currentUserId,
           });
           return res.status(400).json({
             success: false,
@@ -404,9 +417,9 @@ export const startChat = async (req, res, next) => {
         }
 
         // All IDs are valid, convert to ObjectIds
-        const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
-        const receiverObjectId = new mongoose.Types.ObjectId(receiverIdRaw);
         const adObjectId = new mongoose.Types.ObjectId(adIdRaw);
+        const receiverObjectId = new mongoose.Types.ObjectId(receiverIdRaw);
+        const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
         
         // Generate participantsKey (sorted, joined with underscore)
         const participantsKey = [currentUserObjectId.toString(), receiverObjectId.toString()].sort().join('_');

@@ -69,9 +69,9 @@ chatSchema.pre('validate', function (next) {
 chatSchema.index({ participants: 1 });
 chatSchema.index({ ad: 1 });
 chatSchema.index({ participantsKey: 1 });
-// Compound unique index: one chat per ad + participantsKey combination
-// This ensures uniqueness regardless of participants array order
-chatSchema.index({ ad: 1, participantsKey: 1 }, { unique: true });
+// NOTE: Unique index on { ad: 1, participantsKey: 1 } is created by ensureChatIndexes.js script
+// It uses a PARTIAL unique index that only applies when ad is an ObjectId (not null)
+// This prevents duplicate chats with valid ad while allowing legacy chats with ad:null to exist
 
 const Chat = mongoose.model('Chat', chatSchema);
 
