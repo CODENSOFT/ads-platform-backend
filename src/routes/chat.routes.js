@@ -36,14 +36,6 @@ router.get('/unread-count', protect, unreadCount);
 router.get('/', protect, getChats);
 
 /**
- * @route   GET /api/chats/:id/messages
- * @desc    Get messages for a chat
- * @access  Private
- * @middleware protect - JWT authentication required
- */
-router.get('/:id/messages', protect, getMessages);
-
-/**
  * @route   POST /api/chats/start
  * @desc    Start or get existing chat for an ad
  * @access  Private
@@ -54,14 +46,6 @@ router.get('/:id/messages', protect, getMessages);
 router.post('/start', protect, apiLimiter, startChat);
 
 /**
- * @route   POST /api/chats/:id/messages
- * @desc    Send a message in a chat
- * @access  Private
- * @middleware protect - JWT authentication required, apiLimiter - rate limited
- */
-router.post('/:id/messages', protect, apiLimiter, sendMessage);
-
-/**
  * @route   DELETE /api/chats/:id
  * @desc    Delete a chat and all its messages
  * @access  Private
@@ -69,7 +53,25 @@ router.post('/:id/messages', protect, apiLimiter, sendMessage);
  * 
  * Only participants can delete a chat.
  * This will delete all messages in the chat as well.
+ * 
+ * IMPORTANT: This route MUST be defined before /:id/messages routes to avoid route conflicts
  */
 router.delete('/:id', protect, apiLimiter, deleteChat);
+
+/**
+ * @route   GET /api/chats/:id/messages
+ * @desc    Get messages for a chat
+ * @access  Private
+ * @middleware protect - JWT authentication required
+ */
+router.get('/:id/messages', protect, getMessages);
+
+/**
+ * @route   POST /api/chats/:id/messages
+ * @desc    Send a message in a chat
+ * @access  Private
+ * @middleware protect - JWT authentication required, apiLimiter - rate limited
+ */
+router.post('/:id/messages', protect, apiLimiter, sendMessage);
 
 export default router;

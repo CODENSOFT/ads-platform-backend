@@ -418,76 +418,53 @@ export const getMessages = async (req, res, next) => {
  */
 export const deleteChat = async (req, res, next) => {
   try {
-    // Ensure req.user exists
     if (!req.user || !req.user._id) {
-      return next(
-        new AppError('Authentication required', 401, {
-          type: 'AUTH_REQUIRED',
-        })
-      );
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
     }
 
     const chatId = req.params.id;
-    const currentUserId = req.user._id;
 
-    // Log deletion attempt
-    console.log('[CHAT_DELETE] user:', currentUserId, 'chat:', chatId);
-
-    // Validate chat ID format
     if (!mongoose.Types.ObjectId.isValid(chatId)) {
-      return next(
-        new AppError('Invalid chat ID format', 400, {
-          type: 'INVALID_ID',
-          field: 'id',
-        })
-      );
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid chat ID format',
+        details: { type: 'INVALID_ID', field: 'id' },
+      });
     }
 
-    // Find chat by id
     const chat = await Chat.findById(chatId);
     if (!chat) {
-      return next(
-        new AppError('Chat not found', 404, {
-          type: 'NOT_FOUND',
-          resource: 'Chat',
-        })
-      );
+      return res.status(404).json({
+        success: false,
+        message: 'Chat not found',
+        details: { type: 'NOT_FOUND', resource: 'Chat' },
+      });
     }
 
-    // Check if user is a participant
-    const isParticipant = chat.participants.some(
-      (participantId) => participantId.toString() === currentUserId.toString()
-    );
-
+    const me = req.user._id.toString();
+    const isParticipant = chat.participants?.some((p) => p.toString() === me);
     if (!isParticipant) {
-      return next(
-        new AppError('You are not authorized to delete this chat', 403, {
-          type: 'FORBIDDEN',
-          message: 'Only participants can delete a chat',
-        })
-      );
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You are not a participant in this chat',
+        details: { type: 'FORBIDDEN' },
+      });
     }
 
-    // Delete all messages belonging to this chat
-    const messagesDeleted = await Message.deleteMany({ chat: chatId });
-    console.log('[CHAT_DELETE] Deleted', messagesDeleted.deletedCount, 'messages');
+    console.log('[CHAT_DELETE] user:', me, 'chat:', chatId);
 
-    // Delete the chat
-    await Chat.findByIdAndDelete(chatId);
-    console.log('[CHAT_DELETE] Chat deleted successfully');
+    // Delete messages first
+    await Message.deleteMany({ chat: chat._id });
 
-    res.status(200).json({
-      success: true,
-      message: 'Chat deleted',
-    });
-  } catch (error) {
-    logger.error('[CHAT_DELETE_ERROR]', {
-      message: error.message,
-      stack: error.stack,
-      chatId: req.params.id,
-      userId: req.user?._id?.toString(),
-    });
-    next(error);
+    // Delete chat
+    await Chat.findByIdAndDelete(chat._id);
+
+    return res.status(200).json({ success: true, message: 'Chat deleted' });
+  } catch (err) {
+    return next(err);
   }
 };
 
