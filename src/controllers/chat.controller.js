@@ -176,15 +176,15 @@ export const startChat = async (req, res, next) => {
       });
     }
 
-    // Prepare participants array (sorted for consistency)
-    // Model pre-validate hook will ensure they're sorted
-    const participants = [meObjectId, receiverObjectId].sort((a, b) => 
-      a.toString().localeCompare(b.toString())
-    );
+    // Build sorted pair (canonical order for user1/user2)
+    const [a, b] = [meObjectId.toString(), receiverObjectId.toString()].sort();
+    const user1Id = new mongoose.Types.ObjectId(a);
+    const user2Id = new mongoose.Types.ObjectId(b);
 
-    // Find existing chat by participants (exactly 2, both must match)
+    // Find existing chat by canonical user1/user2 pair
     let chat = await Chat.findOne({
-      participants: { $all: participants, $size: 2 },
+      user1: user1Id,
+      user2: user2Id,
     });
 
     if (chat) {
@@ -213,9 +213,12 @@ export const startChat = async (req, res, next) => {
       });
     }
 
-    // Create new chat (participants will be sorted by pre-validate hook)
+    // Create new chat with canonical user1/user2
+    // Pre-validate hook will also set these, but set explicitly for clarity
     chat = await Chat.create({
-      participants,
+      participants: [user1Id, user2Id],
+      user1: user1Id,
+      user2: user2Id,
     });
 
     // Populate participants (name, email)
@@ -295,14 +298,15 @@ export const startChat = async (req, res, next) => {
         const receiverObjectId = new mongoose.Types.ObjectId(receiverIdRaw);
         const currentUserObjectId = new mongoose.Types.ObjectId(currentUserId);
         
-        // Build participants array (sorted)
-        const participants = [currentUserObjectId, receiverObjectId].sort((a, b) => 
-          a.toString().localeCompare(b.toString())
-        );
+        // Build sorted pair (canonical order for user1/user2)
+        const [a, b] = [currentUserObjectId.toString(), receiverObjectId.toString()].sort();
+        const user1Id = new mongoose.Types.ObjectId(a);
+        const user2Id = new mongoose.Types.ObjectId(b);
 
-        // Find existing chat by participants
+        // Find existing chat by canonical user1/user2 pair
         const existingChat = await Chat.findOne({
-          participants: { $all: participants, $size: 2 },
+          user1: user1Id,
+          user2: user2Id,
         });
 
         if (existingChat) {
@@ -396,9 +400,12 @@ export const getChats = async (req, res, next) => {
     // Convert to ObjectId for queries
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    // Find all chats where user is a participant
+    // Find all chats where user is a participant (use user1/user2 for index efficiency)
     const chats = await Chat.find({
-      participants: userObjectId,
+      $or: [
+        { user1: userObjectId },
+        { user2: userObjectId },
+      ],
     })
       .populate('participants', 'name email')
       .populate('lastMessage')

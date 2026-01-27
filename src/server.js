@@ -33,9 +33,9 @@ const startServer = async () => {
     await connectDB();
     logger.info('Mongo connected');
 
-    // Run migration to remove ad field from chats (runs once, safe to run multiple times)
-    const { migrateChatsRemoveAd } = await import('./scripts/migrateChatsRemoveAd.js');
-    await migrateChatsRemoveAd();
+    // Run migration to convert chats to user1/user2 canonical pair (runs once, safe to run multiple times)
+    const { migrateChatsToUserPair } = await import('./scripts/migrateChatsToUserPair.js');
+    await migrateChatsToUserPair();
 
     // Start Express server only if DB connection is successful
     // Listen on 0.0.0.0 to accept connections from Railway
