@@ -119,7 +119,7 @@ export const getAds = async (req, res, next) => {
       );
     }
 
-    // Validate category if provided
+    // Apply category filter using regex (case-insensitive) on categorySlug field
     if (categoryFilter) {
       if (typeof categoryFilter !== 'string' || categoryFilter.trim().length === 0) {
         return next(
@@ -131,36 +131,25 @@ export const getAds = async (req, res, next) => {
       }
 
       const categoryTrimmed = categoryFilter.trim();
-      if (!isValidCategorySlug(categoryTrimmed)) {
-        // If category doesn't match, return empty results instead of error
-        // This allows frontend to handle invalid categories gracefully
-        query.categorySlug = '__invalid__'; // This will match nothing
-      } else {
-        query.categorySlug = categoryTrimmed;
+      const categoryEscaped = escapeRegex(categoryTrimmed);
+      // Use regex for case-insensitive matching on categorySlug field
+      query.categorySlug = new RegExp(`^${categoryEscaped}$`, 'i');
 
-        // If subCategorySlug is provided, validate it belongs to category
-        if (subCategorySlug) {
-          if (typeof subCategorySlug !== 'string' || subCategorySlug.trim().length === 0) {
-            return next(
-              new AppError('Invalid subCategorySlug parameter', 400, {
-                type: 'INVALID_SUBCATEGORY',
-                field: 'subCategorySlug',
-              })
-            );
-          }
-
-          const subCategorySlugTrimmed = subCategorySlug.trim();
-          if (!isValidSubcategorySlug(categoryTrimmed, subCategorySlugTrimmed)) {
-            return next(
-              new AppError('Invalid subcategory for the selected category', 400, {
-                type: 'INVALID_SUBCATEGORY',
-                field: 'subCategorySlug',
-              })
-            );
-          }
-
-          query.subCategorySlug = subCategorySlugTrimmed;
+      // If subCategorySlug is provided, validate it belongs to category
+      if (subCategorySlug) {
+        if (typeof subCategorySlug !== 'string' || subCategorySlug.trim().length === 0) {
+          return next(
+            new AppError('Invalid subCategorySlug parameter', 400, {
+              type: 'INVALID_SUBCATEGORY',
+              field: 'subCategorySlug',
+            })
+          );
         }
+
+        const subCategorySlugTrimmed = subCategorySlug.trim();
+        // For subcategory, also use regex matching
+        const subCategoryEscaped = escapeRegex(subCategorySlugTrimmed);
+        query.subCategorySlug = new RegExp(`^${subCategoryEscaped}$`, 'i');
       }
     }
 
