@@ -413,6 +413,69 @@ export const getMessages = async (req, res, next) => {
 };
 
 /**
+ * Get a chat by ID
+ * GET /api/chats/:id
+ */
+export const getChatById = async (req, res, next) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+
+    const chatId = req.params.id;
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid chat ID format',
+        details: { type: 'INVALID_ID', field: 'id' },
+      });
+    }
+
+    // Find chat by id
+    const chat = await Chat.findById(chatId);
+    if (!chat) {
+      return res.status(404).json({
+        success: false,
+        message: 'Chat not found',
+      });
+    }
+
+    // Verify user is participant
+    const me = req.user._id.toString();
+    const isParticipant = chat.participants?.some((p) => p.toString() === me);
+    if (!isParticipant) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied',
+        details: { type: 'FORBIDDEN' },
+      });
+    }
+
+    // Populate participants (name, email) and lastMessage
+    await chat.populate('participants', 'name email');
+    await chat.populate('lastMessage');
+
+    return res.status(200).json({
+      success: true,
+      chat: {
+        _id: chat._id,
+        participants: chat.participants,
+        lastMessage: chat.lastMessage,
+        createdAt: chat.createdAt,
+        updatedAt: chat.updatedAt,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
  * Delete a chat and all its messages
  * DELETE /api/chats/:id
  */

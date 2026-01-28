@@ -5,6 +5,7 @@ import {
   getMessages,
   sendMessage,
   unreadCount,
+  getChatById,
   deleteChat,
 } from '../controllers/chat.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
@@ -60,6 +61,17 @@ router.get('/:id/messages', protect, getMessages);
  * @middleware protect - JWT authentication required, apiLimiter - rate limited
  */
 router.post('/:id/messages', protect, apiLimiter, sendMessage);
+
+/**
+ * @route   GET /api/chats/:id
+ * @desc    Get a chat by ID
+ * @access  Private
+ * @middleware protect - JWT authentication required
+ * 
+ * Only participants can view the chat.
+ * IMPORTANT: This route is defined AFTER /:id/messages routes to avoid route conflicts
+ */
+router.get('/:id', protect, getChatById);
 
 /**
  * @route   DELETE /api/chats/:id
