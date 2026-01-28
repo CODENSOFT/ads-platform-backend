@@ -41,7 +41,8 @@ export const getAds = async (req, res, next) => {
       minPrice,
       maxPrice,
       currency,
-      category, // Support both 'category' and 'categorySlug' for compatibility
+      categoryId, // Filter by category ObjectId (if category field exists as ObjectId)
+      category, // Support both 'category' and 'categorySlug' for compatibility (slug-based)
       categorySlug,
       subCategorySlug,
       sort,
@@ -105,12 +106,31 @@ export const getAds = async (req, res, next) => {
       }
     }
 
-    // Filter by category (support both 'category' and 'categorySlug' for compatibility)
+    // Filter by categoryId (ObjectId) - if category field exists as ObjectId reference
+    // NOTE: Ad model currently uses categorySlug (String), not category (ObjectId)
+    // To enable categoryId filtering, add category field to Ad model:
+    // category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }
+    if (categoryId) {
+      if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+        return next(
+          new AppError('Invalid categoryId format', 400, {
+            type: 'INVALID_ID',
+            field: 'categoryId',
+          })
+        );
+      }
+      // Apply filter - will work when Ad model has 'category' ObjectId field
+      // For now, this won't match anything since Ad model only has categorySlug
+      query.category = new mongoose.Types.ObjectId(categoryId);
+    }
+
+    // Filter by category slug (support both 'category' and 'categorySlug' for compatibility)
     // Use category if provided, otherwise fall back to categorySlug
-    const categoryFilter = category || categorySlug;
+    // Only apply slug filter if categoryId was not provided (categoryId takes precedence)
+    const categoryFilter = !categoryId ? (category || categorySlug) : null;
 
     // If subCategorySlug is provided without category, return error
-    if (subCategorySlug && !categoryFilter) {
+    if (subCategorySlug && !categoryFilter && !categoryId) {
       return next(
         new AppError('category required when filtering by subCategorySlug', 400, {
           type: 'INVALID_FILTER',
@@ -119,7 +139,7 @@ export const getAds = async (req, res, next) => {
       );
     }
 
-    // Apply category filter using regex (case-insensitive) on categorySlug field
+    // Apply category slug filter using regex (case-insensitive) on categorySlug field
     if (categoryFilter) {
       if (typeof categoryFilter !== 'string' || categoryFilter.trim().length === 0) {
         return next(
