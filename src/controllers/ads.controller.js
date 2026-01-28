@@ -41,6 +41,7 @@ export const getAds = async (req, res, next) => {
       minPrice,
       maxPrice,
       currency,
+      category, // Support both 'category' and 'categorySlug' for compatibility
       categorySlug,
       subCategorySlug,
       sort,
@@ -104,62 +105,62 @@ export const getAds = async (req, res, next) => {
       }
     }
 
-    // Filter by categorySlug and subCategorySlug
-    // If subCategorySlug is provided without categorySlug, return error
-    if (subCategorySlug && !categorySlug) {
+    // Filter by category (support both 'category' and 'categorySlug' for compatibility)
+    // Use category if provided, otherwise fall back to categorySlug
+    const categoryFilter = category || categorySlug;
+
+    // If subCategorySlug is provided without category, return error
+    if (subCategorySlug && !categoryFilter) {
       return next(
-        new AppError('categorySlug required when filtering by subCategorySlug', 400, {
+        new AppError('category required when filtering by subCategorySlug', 400, {
           type: 'INVALID_FILTER',
           field: 'subCategorySlug',
         })
       );
     }
 
-    // Validate categorySlug if provided
-    if (categorySlug) {
-      if (typeof categorySlug !== 'string' || categorySlug.trim().length === 0) {
+    // Validate category if provided
+    if (categoryFilter) {
+      if (typeof categoryFilter !== 'string' || categoryFilter.trim().length === 0) {
         return next(
-          new AppError('Invalid categorySlug parameter', 400, {
+          new AppError('Invalid category parameter', 400, {
             type: 'INVALID_CATEGORY',
-            field: 'categorySlug',
+            field: 'category',
           })
         );
       }
 
-      const categorySlugTrimmed = categorySlug.trim();
-      if (!isValidCategorySlug(categorySlugTrimmed)) {
-        return next(
-          new AppError('Invalid category', 400, {
-            type: 'INVALID_CATEGORY',
-            field: 'categorySlug',
-          })
-        );
-      }
+      const categoryTrimmed = categoryFilter.trim();
+      if (!isValidCategorySlug(categoryTrimmed)) {
+        // If category doesn't match, return empty results instead of error
+        // This allows frontend to handle invalid categories gracefully
+        query.categorySlug = '__invalid__'; // This will match nothing
+      } else {
+        query.categorySlug = categoryTrimmed;
 
-      query.categorySlug = categorySlugTrimmed;
+        // If subCategorySlug is provided, validate it belongs to category
+        if (subCategorySlug) {
+          if (typeof subCategorySlug !== 'string' || subCategorySlug.trim().length === 0) {
+            return next(
+              new AppError('Invalid subCategorySlug parameter', 400, {
+                type: 'INVALID_SUBCATEGORY',
+                field: 'subCategorySlug',
+              })
+            );
+          }
 
-      // If subCategorySlug is provided, validate it belongs to category
-      if (subCategorySlug) {
-        if (typeof subCategorySlug !== 'string' || subCategorySlug.trim().length === 0) {
-          return next(
-            new AppError('Invalid subCategorySlug parameter', 400, {
-              type: 'INVALID_SUBCATEGORY',
-              field: 'subCategorySlug',
-            })
-          );
+          const subCategorySlugTrimmed = subCategorySlug.trim();
+          if (!isValidSubcategorySlug(categoryTrimmed, subCategorySlugTrimmed)) {
+            return next(
+              new AppError('Invalid subcategory for the selected category', 400, {
+                type: 'INVALID_SUBCATEGORY',
+                field: 'subCategorySlug',
+              })
+            );
+          }
+
+          query.subCategorySlug = subCategorySlugTrimmed;
         }
-
-        const subCategorySlugTrimmed = subCategorySlug.trim();
-        if (!isValidSubcategorySlug(categorySlugTrimmed, subCategorySlugTrimmed)) {
-          return next(
-            new AppError('Invalid subcategory for the selected category', 400, {
-              type: 'INVALID_SUBCATEGORY',
-              field: 'subCategorySlug',
-            })
-          );
-        }
-
-        query.subCategorySlug = subCategorySlugTrimmed;
       }
     }
 
@@ -214,9 +215,19 @@ export const getAds = async (req, res, next) => {
     }
 
     // Pagination logic
+    // Validate page >= 1
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
-    const skip = (pageNum - 1) * limitNum;
+    
+    // Validate limit: 0 = no limit, otherwise 1..50
+    let limitNum = parseInt(limit, 10);
+    if (isNaN(limitNum) || limitNum < 0) {
+      limitNum = 0; // Default: no limit
+    } else if (limitNum > 0) {
+      limitNum = Math.min(50, Math.max(1, limitNum)); // Clamp between 1 and 50
+    }
+    // limitNum can be 0 (no limit) or 1-50
+    
+    const skip = limitNum > 0 ? (pageNum - 1) * limitNum : 0;
 
     // Sorting logic
     // Default: newest (createdAt desc)
@@ -239,29 +250,48 @@ export const getAds = async (req, res, next) => {
     }
 
     // Execute query with pagination and sorting
+    const findQuery = Ad.find(query)
+      .populate('user', 'name email')
+      .sort(sortOptions)
+      .skip(skip);
+    
+    // Only apply limit if > 0 (0 means no limit)
+    if (limitNum > 0) {
+      findQuery.limit(limitNum);
+    }
+    
     const [ads, total] = await Promise.all([
-      Ad.find(query)
-        .populate('user', 'name email')
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
+      findQuery.lean(),
       Ad.countDocuments(query),
     ]);
 
     // Calculate pagination metadata
-    const pages = Math.ceil(total / limitNum);
+    const pages = limitNum > 0 ? Math.ceil(total / limitNum) : 1;
 
-    // Build response
+    // Build response with both formats for backward compatibility
     const response = {
       success: true,
+      // Top-level ads for backward compatibility
       ads,
+      // New data wrapper format
+      data: {
+        ads,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages,
+          hasNext: limitNum > 0 ? pageNum < pages : false,
+          hasPrev: pageNum > 1,
+        },
+      },
+      // Also include pagination at top level for backward compatibility
       pagination: {
         page: pageNum,
         limit: limitNum,
         total,
         pages,
-        hasNext: pageNum < pages,
+        hasNext: limitNum > 0 ? pageNum < pages : false,
         hasPrev: pageNum > 1,
       },
     };
@@ -270,6 +300,7 @@ export const getAds = async (req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
       response.filters = {
         search: searchTerm || null,
+        category: categoryFilter ? categoryFilter.trim() : null,
         categorySlug: categorySlug ? categorySlug.trim() : null,
         subCategorySlug: subCategorySlug ? subCategorySlug.trim() : null,
         minPrice: minPrice ? parseFloat(minPrice) : null,
