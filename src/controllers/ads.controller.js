@@ -62,15 +62,15 @@ export const getAds = async (req, res, next) => {
       isDeleted: false,
     };
 
-    // Text search by title or description (case-insensitive)
-    // Support both 'q' (backward compatibility) and 'search' parameters
-    const searchTerm = search || q;
-    if (searchTerm && typeof searchTerm === 'string' && searchTerm.trim().length > 0) {
-      const searchEscaped = escapeRegex(searchTerm.trim());
-      query.$or = [
-        { title: { $regex: searchEscaped, $options: 'i' } },
-        { description: { $regex: searchEscaped, $options: 'i' } },
-      ];
+    // Text search by title (case-insensitive)
+    // Support both 'search' and legacy 'q' parameter (search takes precedence)
+    const searchRaw = (typeof search === 'string' && search.trim().length > 0)
+      ? search
+      : q;
+    const searchTerm = (typeof searchRaw === 'string' ? searchRaw.trim() : '');
+    if (searchTerm.length > 0) {
+      const searchEscaped = escapeRegex(searchTerm);
+      query.title = { $regex: searchEscaped, $options: 'i' };
     }
 
     // Filter by price range
@@ -218,16 +218,14 @@ export const getAds = async (req, res, next) => {
     // Validate page >= 1
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     
-    // Validate limit: 0 = no limit, otherwise 1..50
+    // Validate limit: default 20, clamp 1..50
     let limitNum = parseInt(limit, 10);
-    if (isNaN(limitNum) || limitNum < 0) {
-      limitNum = 0; // Default: no limit
-    } else if (limitNum > 0) {
-      limitNum = Math.min(50, Math.max(1, limitNum)); // Clamp between 1 and 50
+    if (isNaN(limitNum) || limitNum < 1) {
+      limitNum = 20;
     }
-    // limitNum can be 0 (no limit) or 1-50
+    limitNum = Math.min(50, Math.max(1, limitNum));
     
-    const skip = limitNum > 0 ? (pageNum - 1) * limitNum : 0;
+    const skip = (pageNum - 1) * limitNum;
 
     // Sorting logic
     // Default: newest (createdAt desc)
@@ -255,10 +253,7 @@ export const getAds = async (req, res, next) => {
       .sort(sortOptions)
       .skip(skip);
     
-    // Only apply limit if > 0 (0 means no limit)
-    if (limitNum > 0) {
-      findQuery.limit(limitNum);
-    }
+    findQuery.limit(limitNum);
     
     const [ads, total] = await Promise.all([
       findQuery.lean(),
@@ -266,7 +261,7 @@ export const getAds = async (req, res, next) => {
     ]);
 
     // Calculate pagination metadata
-    const pages = limitNum > 0 ? Math.ceil(total / limitNum) : 1;
+    const pages = Math.ceil(total / limitNum);
 
     // Build response with both formats for backward compatibility
     const response = {
@@ -281,7 +276,7 @@ export const getAds = async (req, res, next) => {
           limit: limitNum,
           total,
           pages,
-          hasNext: limitNum > 0 ? pageNum < pages : false,
+          hasNext: pageNum < pages,
           hasPrev: pageNum > 1,
         },
       },
@@ -291,7 +286,7 @@ export const getAds = async (req, res, next) => {
         limit: limitNum,
         total,
         pages,
-        hasNext: limitNum > 0 ? pageNum < pages : false,
+        hasNext: pageNum < pages,
         hasPrev: pageNum > 1,
       },
     };
