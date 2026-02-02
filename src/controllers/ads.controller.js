@@ -7,7 +7,7 @@ import { AppError } from '../middlewares/error.middleware.js';
 import cloudinary from '../config/cloudinary.js';
 import logger from '../config/logger.js';
 import { validateAttributesAgainstCategory } from '../utils/attributeValidator.js';
-import { getAllowedFields, validateDetails } from '../utils/detailsValidator.js';
+import { mergeFieldsByKey, sanitizeAndValidateDetails, DetailsValidationError } from '../utils/dynamicDetails.js';
 
 /**
  * Escape regex special characters to prevent regex injection
@@ -99,11 +99,12 @@ export const getAds = async (req, res, next) => {
     if (categorySlug) q.categorySlug = categorySlug;
     if (subCategorySlug) q.subCategorySlug = subCategorySlug;
 
-    // Dynamic details filters: details.field (exact) or details.field_min / details.field_max (range)
+    // Details filters: d_<key> (exact or $in if comma-separated), d_<key>_min / d_<key>_max (range)
     const detailsFilters = {};
-    const queryEntries = Object.entries(req.query).filter(([k, v]) => v !== undefined && v !== null && v !== '' && k.startsWith('details.'));
-    for (const [key, value] of queryEntries) {
-      const rest = key.slice(8);
+    for (const [key, value] of Object.entries(req.query)) {
+      if (value === undefined || value === null || value === '') continue;
+      if (!key.startsWith('d_')) continue;
+      const rest = key.slice(2);
       if (rest.endsWith('_min')) {
         const field = rest.slice(0, -4);
         const num = Number(value);
@@ -120,14 +121,25 @@ export const getAds = async (req, res, next) => {
         }
       }
     }
-    for (const [key, value] of queryEntries) {
-      const rest = key.slice(8);
-      if (rest.endsWith('_min') || rest.endsWith('_max')) continue;
+    for (const [key, value] of Object.entries(req.query)) {
+      if (value === undefined || value === null || value === '') continue;
+      if (!key.startsWith('d_') || key.endsWith('_min') || key.endsWith('_max')) continue;
+      const rest = key.slice(2);
       const str = String(value).trim();
       if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') continue;
       if (detailsFilters[rest] && typeof detailsFilters[rest] === 'object' && !Array.isArray(detailsFilters[rest]) && ('$gte' in detailsFilters[rest] || '$lte' in detailsFilters[rest])) continue;
-      const num = Number(value);
-      detailsFilters[rest] = !Number.isNaN(num) ? num : str;
+      if (str.includes(',')) {
+        const values = str.split(',').map((s) => s.trim()).filter(Boolean);
+        if (values.length > 0) q[`details.${rest}`] = { $in: values };
+      } else {
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          detailsFilters[rest] = num;
+        } else {
+          const escaped = escapeRegex(str);
+          q[`details.${rest}`] = new RegExp(escaped, 'i');
+        }
+      }
     }
     for (const [field, cond] of Object.entries(detailsFilters)) {
       q[`details.${field}`] = cond;
@@ -401,7 +413,7 @@ export const createAd = async (req, res, next) => {
       );
     }
 
-    // Load category and validate attributes (required fields, select options, min/max)
+    // Load category (unknown categorySlug => 400)
     const category = await Category.findOne({ slug: allowedFields.categorySlug.trim().toLowerCase() });
     if (!category) {
       return next(
@@ -421,17 +433,41 @@ export const createAd = async (req, res, next) => {
       );
     }
 
-    // Validate category/subcategory-specific details (getAllowedFields + validateDetails)
-    const categoryPlain = category.toObject ? category.toObject() : category;
+    // Validate subCategorySlug if provided (invalid => 400)
     const subSlug = allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() ? allowedFields.subCategorySlug.trim().toLowerCase() : '';
-    const allowedFieldsList = getAllowedFields(categoryPlain, subSlug);
-    const { cleanedDetails, fieldErrors } = validateDetails(allowedFields.details, allowedFieldsList);
-    if (Object.keys(fieldErrors).length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        details: { fieldErrors },
-      });
+    let subcategory = null;
+    if (subSlug) {
+      const subs = Array.isArray(category.subcategories) ? category.subcategories : [];
+      subcategory = subs.find((s) => (s.slug || '').toString().toLowerCase() === subSlug);
+      if (!subcategory) {
+        return next(
+          new AppError('Invalid subcategory for this category', 400, {
+            type: 'INVALID_SUBCATEGORY',
+            subCategorySlug: allowedFields.subCategorySlug,
+          })
+        );
+      }
+    }
+
+    // Merge category + subcategory fields, sanitize and validate details
+    const categoryPlain = category.toObject ? category.toObject() : category;
+    const baseFields = Array.isArray(categoryPlain.fields) ? categoryPlain.fields : [];
+    const subFields = subcategory && Array.isArray(subcategory.fields) ? subcategory.fields : [];
+    const mergedFields = mergeFieldsByKey(baseFields, subFields);
+    let sanitizedDetails = {};
+    try {
+      const result = sanitizeAndValidateDetails(mergedFields, allowedFields.details);
+      sanitizedDetails = result.sanitizedDetails;
+    } catch (err) {
+      if (err instanceof DetailsValidationError) {
+        return res.status(400).json({
+          success: false,
+          message: err.message,
+          fieldKey: err.fieldKey,
+          ...(err.allowedOptions && { allowedOptions: err.allowedOptions }),
+        });
+      }
+      throw err;
     }
 
     // Validate that images array exists and is not empty (set by uploadToCloudinary middleware)
@@ -453,7 +489,7 @@ export const createAd = async (req, res, next) => {
       categorySlug: allowedFields.categorySlug.trim(),
       ...(allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() && { subCategorySlug: allowedFields.subCategorySlug.trim() }),
       attributes: allowedFields.attributes,
-      details: cleanedDetails,
+      details: sanitizedDetails,
 
       images,
       status: 'draft',
@@ -685,16 +721,33 @@ export const updateAd = async (req, res, next) => {
       const categoryForDetails = await Category.findOne({ slug: effectiveCategorySlug.toLowerCase() }).lean();
       if (categoryForDetails) {
         const effectiveSubSlug = (subCategorySlug !== undefined ? String(subCategorySlug).trim() : (ad.subCategorySlug || '').toString().trim()).toLowerCase();
-        const allowedFieldsList = getAllowedFields(categoryForDetails, effectiveSubSlug);
-        const { cleanedDetails: cleanedDetailsUpdate, fieldErrors: detailsFieldErrors } = validateDetails(details, allowedFieldsList);
-        if (Object.keys(detailsFieldErrors).length > 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Validation error',
-            details: { fieldErrors: detailsFieldErrors },
-          });
+        const subs = Array.isArray(categoryForDetails.subcategories) ? categoryForDetails.subcategories : [];
+        const subMatch = effectiveSubSlug ? subs.find((s) => (s.slug || '').toString().toLowerCase() === effectiveSubSlug) : null;
+        if (effectiveSubSlug && !subMatch) {
+          return next(
+            new AppError('Invalid subcategory for this category', 400, {
+              type: 'INVALID_SUBCATEGORY',
+              subCategorySlug: effectiveSubSlug,
+            })
+          );
         }
-        ad.details = cleanedDetailsUpdate;
+        const baseFields = Array.isArray(categoryForDetails.fields) ? categoryForDetails.fields : [];
+        const subFields = subMatch && Array.isArray(subMatch.fields) ? subMatch.fields : [];
+        const mergedFields = mergeFieldsByKey(baseFields, subFields);
+        try {
+          const result = sanitizeAndValidateDetails(mergedFields, details);
+          ad.details = result.sanitizedDetails;
+        } catch (err) {
+          if (err instanceof DetailsValidationError) {
+            return res.status(400).json({
+              success: false,
+              message: err.message,
+              fieldKey: err.fieldKey,
+              ...(err.allowedOptions && { allowedOptions: err.allowedOptions }),
+            });
+          }
+          throw err;
+        }
       } else {
         ad.details = details && typeof details === 'object' ? details : {};
       }

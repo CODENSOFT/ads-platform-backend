@@ -75,6 +75,15 @@ adSchema.index({ user: 1 }); // Index for user queries
 adSchema.index({ isDeleted: 1 }); // Index for soft delete queries
 // Compound index for category filtering
 adSchema.index({ categorySlug: 1, subCategorySlug: 1, status: 1, createdAt: -1 });
+adSchema.index({ categorySlug: 1, subCategorySlug: 1, createdAt: -1 });
+// Optional indexes for common details filters
+adSchema.index({ 'details.year': 1 });
+adSchema.index({ 'details.fuel': 1 });
+adSchema.index({ 'details.fuelType': 1 });
+adSchema.index({ 'details.rooms': 1 });
+adSchema.index({ 'details.areaM2': 1 });
+adSchema.index({ 'details.surfaceM2': 1 });
+adSchema.index({ 'details.mileageKm': 1 });
 
 // Prevent modification of protected fields
 adSchema.pre('save', function () {

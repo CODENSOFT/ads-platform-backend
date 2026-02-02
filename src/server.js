@@ -45,6 +45,10 @@ const startServer = async () => {
     const { seedCategories } = await import('./seed/categories.seed.js');
     await seedCategories();
 
+    // Upsert 7 categories with dynamic fields (Servicii, Afaceri & Echipamente, Copii, Sport, Animale, Agricultura, Educatie)
+    const { run: seedCategoryFields } = await import('../scripts/seedCategoryFields.js');
+    await seedCategoryFields();
+
     // Start Express server only if DB connection is successful
     // Listen on 0.0.0.0 to accept connections from Railway
     app.listen(PORT, '0.0.0.0', () => {

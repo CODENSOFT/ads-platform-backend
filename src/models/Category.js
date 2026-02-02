@@ -25,10 +25,12 @@ const fieldSchema = new mongoose.Schema(
       type: [String],
       default: undefined,
     },
-    unit: { type: String, default: undefined, trim: true },
     min: { type: Number, default: undefined },
     max: { type: Number, default: undefined },
     placeholder: { type: String, default: undefined, trim: true },
+    unit: { type: String, default: undefined, trim: true },
+    group: { type: String, default: undefined, trim: true },
+    order: { type: Number, default: undefined },
     filterable: {
       type: Boolean,
       default: false,
