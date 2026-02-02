@@ -15,7 +15,7 @@ const fieldSchema = new mongoose.Schema(
     type: {
       type: String,
       required: [true, 'Field type is required'],
-      enum: ['text', 'number', 'select', 'boolean', 'textarea'],
+      enum: ['text', 'textarea', 'number', 'select', 'multiselect', 'boolean', 'date'],
     },
     required: {
       type: Boolean,

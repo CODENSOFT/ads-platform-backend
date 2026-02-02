@@ -102,6 +102,38 @@ export function sanitizeAndValidateDetails(fields, details) {
         sanitizedDetails[key] = strVal;
         break;
       }
+      case 'multiselect': {
+        const arr = Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',').map((s) => s.trim()).filter(Boolean) : []);
+        if (Array.isArray(field.options) && field.options.length > 0) {
+          for (const item of arr) {
+            if (!field.options.includes(item)) {
+              throw new DetailsValidationError(
+                `${field.label || key} must contain only: ${field.options.join(', ')}`,
+                key,
+                field.options
+              );
+            }
+          }
+        }
+        sanitizedDetails[key] = arr;
+        break;
+      }
+      case 'date': {
+        let dateVal = value;
+        if (typeof value === 'string') dateVal = value.trim();
+        if (dateVal instanceof Date && Number.isFinite(dateVal.getTime())) {
+          sanitizedDetails[key] = dateVal.toISOString().slice(0, 10);
+        } else if (typeof dateVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+          sanitizedDetails[key] = dateVal;
+        } else if (typeof dateVal === 'string') {
+          const d = new Date(dateVal);
+          if (Number.isFinite(d.getTime())) sanitizedDetails[key] = d.toISOString().slice(0, 10);
+          else throw new DetailsValidationError(`${field.label || key} must be a valid date (YYYY-MM-DD)`, key, null);
+        } else {
+          throw new DetailsValidationError(`${field.label || key} must be a valid date`, key, null);
+        }
+        break;
+      }
       case 'boolean': {
         if (typeof value === 'boolean') {
           sanitizedDetails[key] = value;
@@ -120,7 +152,7 @@ export function sanitizeAndValidateDetails(fields, details) {
       case 'text':
       case 'textarea':
       default: {
-        sanitizedDetails[key] = String(value).trim();
+        sanitizedDetails[key] = typeof value === 'string' ? value.trim() : String(value).trim();
         break;
       }
     }

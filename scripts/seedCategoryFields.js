@@ -1,5 +1,5 @@
 /**
- * Seed script: upsert 7 categories with dynamic fields and subcategories.
+ * Seed script: upsert 7 categories with dynamic fields (999.md-style).
  * Run from project root: node scripts/seedCategoryFields.js
  * Uses MONGO_URI from .env. Safe to run multiple times (upsert by slug).
  */
@@ -13,295 +13,134 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 import mongoose from 'mongoose';
 import Category from '../src/models/Category.js';
 
-const currentYear = new Date().getFullYear();
-
 const CATEGORIES = [
+  // A) Servicii
   {
     name: 'Servicii',
     slug: 'servicii',
     fields: [
-      { key: 'serviceType', label: 'Tip serviciu', type: 'select', required: true, options: ['Reparatii', 'Curatenie', 'Transport', 'Constructii', 'IT & Software', 'Design', 'Foto/Video', 'Evenimente', 'Consultanta', 'Altele'], order: 1 },
-      { key: 'providerType', label: 'Tip furnizor', type: 'select', required: true, options: ['Persoana Fizica', 'Persoana Juridica'], order: 2 },
-      { key: 'location', label: 'Locatie', type: 'select', required: true, options: ['Chisinau', 'Balti', 'Cahul', 'Orhei', 'Ungheni', 'Edinet', 'Hincesti', 'Ialoveni', 'Alt oras / sat'], order: 3 },
-      { key: 'experienceYears', label: 'Ani experienta', type: 'number', required: false, min: 0, max: 60, unit: 'ani', order: 4 },
-      { key: 'availability', label: 'Disponibilitate', type: 'select', required: false, options: ['Disponibil acum', 'Programare', 'Doar weekend', 'Doar seara'], order: 5 },
-      { key: 'travelToClient', label: 'Deplasare la client', type: 'boolean', required: false, order: 6 },
-      { key: 'warranty', label: 'Garantie', type: 'select', required: false, options: ['Da', 'Nu', 'Depinde de lucrare'], order: 7 },
-      { key: 'contractAvailable', label: 'Contract disponibil', type: 'boolean', required: false, order: 8 },
+      { key: 'serviceType', label: 'Tip', type: 'select', required: true, options: ['Ofer', 'Caut'], order: 1 },
+      { key: 'serviceDomain', label: 'Domeniu', type: 'select', required: true, options: ['IT', 'Constructii', 'Curatenie', 'Auto', 'Beauty', 'Consultanta', 'Transport', 'Evenimente', 'Altele'], order: 2 },
+      { key: 'location', label: 'Locatie', type: 'select', required: true, options: ['Chisinau', 'Balti', 'Orhei', 'Cahul', 'Alt oras', 'Online'], order: 3 },
+      { key: 'availability', label: 'Disponibilitate', type: 'select', required: false, options: ['Imediat', '1-3 zile', '1 saptamana', 'Programare'], order: 4 },
+      { key: 'pricingType', label: 'Tip pret', type: 'select', required: false, options: ['Fix', 'Pe ora', 'Pe proiect', 'Negociabil', 'Gratuit'], order: 5 },
+      { key: 'experienceLevel', label: 'Nivel experienta', type: 'select', required: false, options: ['Incepator', 'Intermediar', 'Avansat', 'Expert'], order: 6 },
+      { key: 'deliveryMode', label: 'Mod livrare', type: 'select', required: false, options: ['La client', 'La mine', 'Online', 'Nu conteaza'], order: 7 },
+      { key: 'warranty', label: 'Garantie', type: 'boolean', required: false, order: 8 },
+      { key: 'legalForm', label: 'Forma juridica', type: 'select', required: false, options: ['Persoana fizica', 'Persoana juridica', 'Contract posibil'], order: 9 },
     ],
-    subcategories: [
-      {
-        slug: 'it-software',
-        name: 'IT & Software (Website, App, Automatizare)',
-        fields: [
-          { key: 'techStack', label: 'Tehnologii', type: 'text', required: false, placeholder: 'ex. React, Node.js' },
-          { key: 'deliveryTimeDays', label: 'Termen livrare', type: 'number', required: false, min: 0, unit: 'zile' },
-          { key: 'supportIncluded', label: 'Suport inclus', type: 'select', required: false, options: ['Da', 'Nu'] },
-          { key: 'portfolioLink', label: 'Link portofoliu', type: 'text', required: false, placeholder: 'https://...' },
-        ],
-      },
-      {
-        slug: 'transport',
-        name: 'Transport',
-        fields: [
-          { key: 'vehicleType', label: 'Tip vehicul', type: 'select', required: false, options: ['Dubă', 'Camion', 'Remorca', 'Autoutilitară', 'Altele'] },
-          { key: 'maxLoadKg', label: 'Încărcătură maximă', type: 'number', required: false, min: 0, unit: 'kg' },
-          { key: 'priceType', label: 'Tip preț', type: 'select', required: false, options: ['Per cursă', 'Per km'] },
-        ],
-      },
-      {
-        slug: 'constructii',
-        name: 'Construcții',
-        fields: [
-          { key: 'specialization', label: 'Specializare', type: 'select', required: false, options: ['Finisaje', 'Electric', 'Instalații', 'Zidărie', 'Acoperiș', 'Altele'] },
-          { key: 'materialIncluded', label: 'Material inclus', type: 'boolean', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
+  // B) Afaceri & Echipamente
   {
     name: 'Afaceri & Echipamente',
     slug: 'afaceri-echipamente',
     fields: [
-      { key: 'itemType', label: 'Tip articol', type: 'select', required: true, options: ['Echipament', 'Utilaj', 'Stoc marfa', 'Afacere la cheie', 'Mobilier comercial', 'Altele'], order: 1 },
-      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Necesita reparatii'], order: 2 },
-      { key: 'brand', label: 'Brand', type: 'text', required: false, placeholder: 'ex. Bosch' },
+      { key: 'offerType', label: 'Tip oferta', type: 'select', required: true, options: ['Vand', 'Cumpar', 'Inchiriez'], order: 1 },
+      { key: 'equipmentCategory', label: 'Categorie echipament', type: 'select', required: true, options: ['HoReCa', 'Industrial', 'Birou', 'Medical', 'Comercial', 'IT/Servere', 'Altele'], order: 2 },
+      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Necesita reparatii'], order: 3 },
+      { key: 'brand', label: 'Brand', type: 'text', required: false },
       { key: 'model', label: 'Model', type: 'text', required: false },
-      { key: 'year', label: 'An', type: 'number', required: false, min: 1950, max: currentYear + 1, unit: 'an' },
-      { key: 'invoiceAvailable', label: 'Factură disponibilă', type: 'boolean', required: false },
-      { key: 'warranty', label: 'Garantie', type: 'select', required: false, options: ['Da', 'Nu'] },
-      { key: 'delivery', label: 'Livrare', type: 'select', required: false, options: ['Ridicare personala', 'Livrare in oras', 'Livrare in tara'] },
+      { key: 'year', label: 'An', type: 'number', required: false },
+      { key: 'originCountry', label: 'Tara origine', type: 'text', required: false },
+      { key: 'documents', label: 'Documente', type: 'boolean', required: false },
+      { key: 'warranty', label: 'Garantie', type: 'boolean', required: false },
+      { key: 'delivery', label: 'Livrare', type: 'select', required: false, options: ['Da', 'Nu', 'Doar ridicare'] },
+      { key: 'weightKg', label: 'Greutate', type: 'number', required: false, unit: 'kg' },
+      { key: 'dimensions', label: 'Dimensiuni', type: 'text', required: false },
     ],
-    subcategories: [
-      {
-        slug: 'horeca',
-        name: 'HoReCa',
-        fields: [
-          { key: 'powerKw', label: 'Putere', type: 'number', required: false, min: 0, unit: 'kW' },
-          { key: 'voltage', label: 'Tensiune', type: 'select', required: false, options: ['220V', '380V'] },
-          { key: 'capacity', label: 'Capacitate', type: 'text', required: false, placeholder: 'ex. 20L, 60x40 cm' },
-        ],
-      },
-      {
-        slug: 'office',
-        name: 'Birou',
-        fields: [
-          { key: 'usageType', label: 'Tip utilizare', type: 'select', required: false, options: ['Calculatoare', 'Printare', 'Mobilier', 'Altele'] },
-          { key: 'compatibility', label: 'Compatibilitate', type: 'text', required: false, placeholder: 'ex. Windows, Mac' },
-        ],
-      },
-      {
-        slug: 'business-for-sale',
-        name: 'Afacere la vânzare',
-        fields: [
-          { key: 'turnoverMonthly', label: 'Cifra de afaceri lunară', type: 'number', required: false, min: 0, unit: 'MDL' },
-          { key: 'profitMonthly', label: 'Profit lunar', type: 'number', required: false, min: 0, unit: 'MDL' },
-          { key: 'employees', label: 'Număr angajați', type: 'number', required: false, min: 0 },
-          { key: 'leaseAvailable', label: 'Închiriere disponibilă', type: 'boolean', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
+  // C) Copii & Bebelusi
   {
     name: 'Copii & Bebelusi',
     slug: 'copii-bebelusi',
     fields: [
-      { key: 'productType', label: 'Tip produs', type: 'select', required: true, options: ['Carucior', 'Patut', 'Haine', 'Incaltaminte', 'Jucarii', 'Scaun auto', 'Alimentatie', 'Igiena', 'Altele'], order: 1 },
-      { key: 'ageRange', label: 'Vârstă', type: 'select', required: true, options: ['0-6 luni', '6-12 luni', '1-2 ani', '2-4 ani', '4-7 ani', '7-12 ani', '12+ ani'], order: 2 },
-      { key: 'gender', label: 'Gen', type: 'select', required: false, options: ['Baiat', 'Fata', 'Unisex'] },
-      { key: 'size', label: 'Mărime', type: 'text', required: false, placeholder: 'ex: 74cm / 2-3 ani / 28 EU' },
-      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Foarte bun', 'Bun', 'Uzura vizibila'], order: 3 },
+      { key: 'productType', label: 'Tip produs', type: 'select', required: true, options: ['Haine', 'Incaltaminte', 'Carucior', 'Patut', 'Jucarii', 'Alimentatie', 'Igiena', 'Altele'], order: 1 },
+      { key: 'ageGroup', label: 'Varsta', type: 'select', required: true, options: ['0-6 luni', '6-12 luni', '1-2 ani', '3-5 ani', '6-9 ani', '10+'], order: 2 },
+      { key: 'gender', label: 'Gen', type: 'select', required: false, options: ['Fata', 'Baiat', 'Unisex'] },
+      { key: 'size', label: 'Marime', type: 'text', required: false },
+      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Uzata'], order: 3 },
+      { key: 'brand', label: 'Brand', type: 'text', required: false },
       { key: 'material', label: 'Material', type: 'text', required: false },
-      { key: 'originalBox', label: 'Cutie originală', type: 'boolean', required: false },
+      { key: 'sealed', label: 'Sigilat', type: 'boolean', required: false },
+      { key: 'delivery', label: 'Livrare', type: 'boolean', required: false },
     ],
-    subcategories: [
-      {
-        slug: 'stroller',
-        name: 'Carucioare',
-        fields: [
-          { key: 'strollerType', label: 'Tip carucior', type: 'select', required: false, options: ['Clasic', 'Sport', 'Gemene', '3 în 1', 'Altele'] },
-          { key: 'foldable', label: 'Pliazabil', type: 'boolean', required: false },
-          { key: 'weightKg', label: 'Greutate', type: 'number', required: false, min: 0, unit: 'kg' },
-        ],
-      },
-      {
-        slug: 'car-seat',
-        name: 'Scaune auto',
-        fields: [
-          { key: 'group', label: 'Grup', type: 'select', required: false, options: ['0', '0+', '1', '2', '3', '0-1', '1-2-3'] },
-          { key: 'isofix', label: 'Isofix', type: 'boolean', required: false },
-        ],
-      },
-      {
-        slug: 'clothes',
-        name: 'Haine',
-        fields: [
-          { key: 'season', label: 'Sezon', type: 'select', required: false, options: ['Vara', 'Iarna', 'Demisezon', 'Toate'] },
-          { key: 'brand', label: 'Brand', type: 'text', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
+  // D) Sport & Timp Liber
   {
     name: 'Sport & Timp Liber',
     slug: 'sport-timp-liber',
     fields: [
-      { key: 'sportType', label: 'Tip sport', type: 'select', required: true, options: ['Fitness', 'Fotbal', 'Tenis', 'Schi/Snowboard', 'Pescuit', 'Camping', 'Ciclism', 'Alergare', 'Altele'], order: 1 },
-      { key: 'itemType', label: 'Tip articol', type: 'select', required: true, options: ['Echipament', 'Haine', 'Accesorii', 'Bicicleta', 'Abonament', 'Altele'], order: 2 },
-      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Bun', 'Uzura vizibila'], order: 3 },
+      { key: 'sportType', label: 'Tip sport', type: 'select', required: true, options: ['Echipament', 'Biciclete', 'Fitness', 'Camping', 'Pescuit', 'Vanatoare', 'Jocuri', 'Altele'], order: 1 },
+      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Uzata'], order: 2 },
       { key: 'brand', label: 'Brand', type: 'text', required: false },
-      { key: 'size', label: 'Mărime', type: 'text', required: false },
-      { key: 'forWho', label: 'Pentru', type: 'select', required: false, options: ['Adult', 'Copil', 'Unisex'] },
+      { key: 'model', label: 'Model', type: 'text', required: false },
+      { key: 'size', label: 'Marime', type: 'text', required: false },
+      { key: 'weightKg', label: 'Greutate', type: 'number', required: false, unit: 'kg' },
+      { key: 'material', label: 'Material', type: 'text', required: false },
+      { key: 'level', label: 'Nivel', type: 'select', required: false, options: ['Incepator', 'Intermediar', 'Avansat', 'Pro'] },
+      { key: 'delivery', label: 'Livrare', type: 'boolean', required: false },
     ],
-    subcategories: [
-      {
-        slug: 'bicycles',
-        name: 'Biciclete',
-        fields: [
-          { key: 'bikeType', label: 'Tip bicicletă', type: 'select', required: false, options: ['Oraș', 'MTB', 'Șosea', 'Electrică', 'Copil', 'Altele'] },
-          { key: 'frameSize', label: 'Mărime cadru', type: 'select', required: false, options: ['XS', 'S', 'M', 'L', 'XL', 'Universal'] },
-          { key: 'wheelSize', label: 'Mărime roți', type: 'number', required: false, min: 12, max: 29, unit: 'inch' },
-          { key: 'gears', label: 'Număr viteze', type: 'number', required: false, min: 1, max: 33 },
-        ],
-      },
-      {
-        slug: 'camping',
-        name: 'Camping',
-        fields: [
-          { key: 'capacityPersons', label: 'Capacitate', type: 'number', required: false, min: 1, unit: 'persoane' },
-          { key: 'seasonRating', label: 'Sezon', type: 'select', required: false, options: ['3 sezoane', '4 sezoane'] },
-          { key: 'weightKg', label: 'Greutate', type: 'number', required: false, min: 0, unit: 'kg' },
-        ],
-      },
-      {
-        slug: 'fishing',
-        name: 'Pescuit',
-        fields: [
-          { key: 'rodLengthM', label: 'Lungime undiță', type: 'number', required: false, min: 0, unit: 'm' },
-          { key: 'reelIncluded', label: 'Mulinetă inclusă', type: 'boolean', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
+  // E) Animale
   {
     name: 'Animale',
     slug: 'animale',
     fields: [
-      { key: 'animalType', label: 'Tip animal', type: 'select', required: true, options: ['Caini', 'Pisici', 'Pasari', 'Rozatoare', 'Pesti', 'Reptile', 'Altele'], order: 1 },
-      { key: 'offerType', label: 'Tip ofertă', type: 'select', required: true, options: ['Adoptie', 'Vanzare', 'Imperechere', 'Servicii (grooming/vet)', 'Altele'], order: 2 },
-      { key: 'breed', label: 'Rasă', type: 'text', required: false },
-      { key: 'ageMonths', label: 'Vârstă', type: 'number', required: false, min: 0, max: 360, unit: 'luni' },
-      { key: 'gender', label: 'Gen', type: 'select', required: false, options: ['Mascul', 'Femela'] },
+      { key: 'listingType', label: 'Tip anunt', type: 'select', required: true, options: ['Vand', 'Donez', 'Monta', 'Adoptie', 'Pierdut/Gasit'], order: 1 },
+      { key: 'species', label: 'Specie', type: 'select', required: true, options: ['Caine', 'Pisica', 'Pasari', 'Rozatoare', 'Pesti', 'Reptile', 'Animale de ferma', 'Altele'], order: 2 },
+      { key: 'breed', label: 'Rasa', type: 'text', required: false },
+      { key: 'ageValue', label: 'Varsta (valoare)', type: 'number', required: true, min: 0, order: 3 },
+      { key: 'ageUnit', label: 'Unitate varsta', type: 'select', required: true, options: ['Luni', 'Ani'], order: 4 },
+      { key: 'sex', label: 'Sex', type: 'select', required: false, options: ['Mascul', 'Femela'] },
       { key: 'vaccinated', label: 'Vaccinat', type: 'select', required: false, options: ['Da', 'Nu', 'Partial'] },
-      { key: 'dewormed', label: 'Dewormat', type: 'select', required: false, options: ['Da', 'Nu'] },
-      { key: 'passport', label: 'Pașaport', type: 'boolean', required: false },
+      { key: 'dewormed', label: 'Dewormat', type: 'boolean', required: false },
+      { key: 'sterilized', label: 'Sterilizat', type: 'select', required: false, options: ['Da', 'Nu', 'Nu stiu'] },
+      { key: 'passport', label: 'Pasaport', type: 'boolean', required: false },
+      { key: 'microchip', label: 'Microcip', type: 'boolean', required: false },
+      { key: 'pedigree', label: 'Pedigree', type: 'boolean', required: false },
+      { key: 'delivery', label: 'Livrare', type: 'boolean', required: false },
     ],
-    subcategories: [
-      {
-        slug: 'dogs',
-        name: 'Câini',
-        fields: [
-          { key: 'sizeCategory', label: 'Mărime', type: 'select', required: false, options: ['Mic', 'Mediu', 'Mare', 'Foarte mare'] },
-          { key: 'trained', label: 'Dresat', type: 'select', required: false, options: ['Da', 'Nu', 'Parțial'] },
-          { key: 'microchipped', label: 'Cipat', type: 'boolean', required: false },
-        ],
-      },
-      {
-        slug: 'cats',
-        name: 'Pisici',
-        fields: [
-          { key: 'indoorOnly', label: 'Doar în casă', type: 'boolean', required: false },
-        ],
-      },
-      {
-        slug: 'services',
-        name: 'Servicii (grooming, vet)',
-        fields: [
-          { key: 'serviceType', label: 'Tip serviciu', type: 'select', required: false, options: ['Grooming', 'Veterinar', 'Pensiune', 'Dresaj', 'Altele'] },
-          { key: 'homeVisit', label: 'Vizită la domiciliu', type: 'boolean', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
+  // F) Agricultura
   {
     name: 'Agricultura',
     slug: 'agricultura',
     fields: [
-      { key: 'categoryType', label: 'Tip', type: 'select', required: true, options: ['Tehnica agricola', 'Seminte', 'Ingrasaminte', 'Furaje', 'Animale de ferma', 'Produse agricole', 'Altele'], order: 1 },
-      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Bun', 'Necesita reparatii'], order: 2 },
-      { key: 'year', label: 'An', type: 'number', required: false, min: 1950, max: currentYear + 1 },
+      { key: 'agriType', label: 'Tip', type: 'select', required: true, options: ['Utilaje', 'Piese', 'Seminte', 'Ingrasaminte', 'Produse', 'Servicii agricole', 'Altele'], order: 1 },
+      { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Necesita reparatii'], order: 2 },
       { key: 'brand', label: 'Brand', type: 'text', required: false },
       { key: 'model', label: 'Model', type: 'text', required: false },
-      { key: 'quantity', label: 'Cantitate', type: 'number', required: false, min: 0 },
-      { key: 'unit', label: 'Unitate', type: 'select', required: false, options: ['kg', 't', 'l', 'buc', 'saci', 'm3'] },
+      { key: 'year', label: 'An', type: 'number', required: false },
+      { key: 'power', label: 'Putere', type: 'number', required: false, unit: 'HP/kW' },
+      { key: 'workingHours', label: 'Ore lucrate', type: 'number', required: false },
+      { key: 'capacity', label: 'Capacitate', type: 'text', required: false },
+      { key: 'documents', label: 'Documente', type: 'boolean', required: false },
+      { key: 'delivery', label: 'Livrare', type: 'boolean', required: false },
     ],
-    subcategories: [
-      {
-        slug: 'machinery',
-        name: 'Tehnică agricolă',
-        fields: [
-          { key: 'enginePowerHp', label: 'Putere motor', type: 'number', required: false, min: 0, unit: 'CP' },
-          { key: 'workingWidthM', label: 'Lățime lucru', type: 'number', required: false, min: 0, unit: 'm' },
-          { key: 'hoursWorked', label: 'Ore lucrate', type: 'number', required: false, min: 0 },
-        ],
-      },
-      {
-        slug: 'seeds',
-        name: 'Semințe',
-        fields: [
-          { key: 'cropType', label: 'Tip cultură', type: 'select', required: false, options: ['Cereale', 'Leguminoase', 'Legume', 'Fructe', 'Furaje', 'Altele'] },
-          { key: 'season', label: 'Sezon', type: 'select', required: false, options: ['Primăvară', 'Toamna', 'Anual'] },
-          { key: 'origin', label: 'Origine', type: 'text', required: false },
-        ],
-      },
-      {
-        slug: 'products',
-        name: 'Produse agricole',
-        fields: [
-          { key: 'harvestYear', label: 'An recoltă', type: 'number', required: false, min: 2000, max: currentYear },
-          { key: 'organic', label: 'Organic', type: 'boolean', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
+  // G) Educatie & Cursuri
   {
     name: 'Educatie & Cursuri',
     slug: 'educatie-cursuri',
     fields: [
-      { key: 'courseType', label: 'Tip curs', type: 'select', required: true, options: ['Limbi straine', 'IT & Programare', 'Meditatii', 'Muzica', 'Sport', 'Business', 'Altele'], order: 1 },
-      { key: 'level', label: 'Nivel', type: 'select', required: true, options: ['Incepator', 'Intermediar', 'Avansat', 'Toate nivelurile'], order: 2 },
-      { key: 'format', label: 'Format', type: 'select', required: true, options: ['Online', 'Offline', 'Online + Offline'], order: 3 },
-      { key: 'city', label: 'Oraș', type: 'select', required: false, options: ['Chisinau', 'Balti', 'Cahul', 'Orhei', 'Ungheni', 'Alt oras / sat'] },
-      { key: 'durationWeeks', label: 'Durată', type: 'number', required: false, min: 1, max: 520, unit: 'săptămâni' },
-      { key: 'certificate', label: 'Certificat', type: 'select', required: false, options: ['Da', 'Nu'] },
-      { key: 'groupOr1to1', label: 'Grup / Individual', type: 'select', required: false, options: ['Grup', 'Individual', 'Ambele'] },
+      { key: 'educationType', label: 'Tip educatie', type: 'select', required: true, options: ['Curs', 'Meditatii', 'Training', 'Workshop'], order: 1 },
+      { key: 'domain', label: 'Domeniu', type: 'select', required: true, options: ['Limbi', 'IT', 'Matematica', 'Muzica', 'Business', 'Auto', 'Altele'], order: 2 },
+      { key: 'level', label: 'Nivel', type: 'select', required: true, options: ['Incepator', 'Intermediar', 'Avansat'], order: 3 },
+      { key: 'format', label: 'Format', type: 'select', required: true, options: ['Online', 'Fizic', 'Hibrid'], order: 4 },
+      { key: 'location', label: 'Locatie', type: 'text', required: false },
+      { key: 'duration', label: 'Durata', type: 'text', required: false },
+      { key: 'schedule', label: 'Program', type: 'text', required: false },
+      { key: 'certificate', label: 'Certificat', type: 'boolean', required: false },
+      { key: 'pricingType', label: 'Tip pret', type: 'select', required: false, options: ['Pe sedinta', 'Pe curs', 'Negociabil'] },
+      { key: 'studyMode', label: 'Mod studiu', type: 'select', required: false, options: ['Individual', 'Grup', 'Ambele'] },
     ],
-    subcategories: [
-      {
-        slug: 'it-programming',
-        name: 'IT & Programare',
-        fields: [
-          { key: 'language', label: 'Limbaj / tehnologie', type: 'select', required: false, options: ['JavaScript', 'Python', 'Java', 'C#', 'React', 'Node.js', 'Altele'] },
-          { key: 'projectsIncluded', label: 'Proiecte practice incluse', type: 'boolean', required: false },
-        ],
-      },
-      {
-        slug: 'languages',
-        name: 'Limbi străine',
-        fields: [
-          { key: 'languageName', label: 'Limbă', type: 'select', required: false, options: ['Engleză', 'Germană', 'Franceză', 'Română', 'Rusă', 'Italiană', 'Spaniolă', 'Altele'] },
-          { key: 'nativeTeacher', label: 'Profesor nativ', type: 'boolean', required: false },
-        ],
-      },
-      {
-        slug: 'tutoring',
-        name: 'Meditații',
-        fields: [
-          { key: 'subject', label: 'Materie', type: 'text', required: false, placeholder: 'ex. Matematică, Fizică' },
-          { key: 'examPrep', label: 'Pregătire examene', type: 'boolean', required: false },
-        ],
-      },
-    ],
+    subcategories: [],
   },
 ];
 

@@ -470,6 +470,10 @@ export const createAd = async (req, res, next) => {
       throw err;
     }
 
+    if (process.env.NODE_ENV !== 'production' && Object.keys(sanitizedDetails).length > 0) {
+      logger.info('createAd details validated', { categorySlug: allowedFields.categorySlug, keys: Object.keys(sanitizedDetails) });
+    }
+
     // Validate that images array exists and is not empty (set by uploadToCloudinary middleware)
     const images = req.body.images;
     if (!images || !Array.isArray(images) || images.length === 0) {
