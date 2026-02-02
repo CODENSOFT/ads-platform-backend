@@ -510,8 +510,20 @@ export const createAd = async (req, res, next) => {
     if (category && Object.keys(fieldErrors).length === 0) {
       const baseFields = Array.isArray(category.fields) ? category.fields : [];
       const subFields = Array.isArray(sub?.fields) ? sub.fields : [];
-      const fields = mergeFieldsByKey(baseFields, subFields);
+      // Union fallback: when category has no base fields, use selected subcategory fields or union of all subcategory fields
+      let fields;
+      if (baseFields.length > 0) {
+        fields = mergeFieldsByKey(baseFields, subFields);
+      } else if (subFields.length > 0) {
+        fields = mergeFieldsByKey([], subFields);
+      } else {
+        const subs = Array.isArray(category.subcategories) ? category.subcategories : [];
+        const allSubFields = subs.reduce((acc, s) => acc.concat(Array.isArray(s.fields) ? s.fields : []), []);
+        fields = mergeFieldsByKey([], allSubFields);
+      }
+
       const { sanitized: sanitizedDetails, fieldErrors: detailErrs, invalidKeys } = validateDetails(fields, detailsObj, { categorySlug });
+      const allowedDetailKeys = fields.map((f) => f.key);
 
       // Extra fields not allowed: keys in details not in category/subcategory schema
       if (invalidKeys && invalidKeys.length > 0) {
@@ -519,8 +531,10 @@ export const createAd = async (req, res, next) => {
           success: false,
           code: 'EXTRA_FIELDS_NOT_ALLOWED',
           message: 'Extra fields not allowed',
-          fieldErrors: { details: `Invalid fields: ${invalidKeys.join(', ')}` },
+          fieldErrors: { details: `Invalid fields: ${invalidKeys.join(', ')}. Allowed for this category: ${allowedDetailKeys.join(', ') || 'none'}` },
           invalidKeys,
+          allowedDetailKeys,
+          suggestedFix: `Remove or rename these keys in details: ${invalidKeys.join(', ')}. Use only: ${allowedDetailKeys.join(', ') || '—'}`,
           receivedBodyKeys: Object.keys(req.body || {}),
           receivedFileFields: Array.isArray(req.files)
             ? [...new Set(req.files.map((f) => f.fieldname).filter(Boolean))]

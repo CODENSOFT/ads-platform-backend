@@ -45,7 +45,7 @@ const startServer = async () => {
     const { seedCategories } = await import('./seed/categories.seed.js');
     await seedCategories();
 
-    // Upsert 7 categories with dynamic fields (Servicii, Afaceri & Echipamente, Copii, Sport, Animale, Agricultura, Educatie)
+    // Upsert 4 categories with dynamic fields (business-equipment, kids-babies, sport-leisure, education-courses)
     const { run: seedCategoryFields } = await import('../scripts/seedCategoryFields.js');
     await seedCategoryFields();
 
