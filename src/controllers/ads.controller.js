@@ -390,6 +390,31 @@ export const createAd = async (req, res, next) => {
       });
     }
 
+    // Allowed top-level body keys only (details validated dynamically by category schema later)
+    const ALLOWED_BODY_KEYS = ['title', 'description', 'price', 'currency', 'categorySlug', 'subCategorySlug', 'details', 'attributes', 'images'];
+    const isAllowedBodyKey = (k) =>
+      ALLOWED_BODY_KEYS.includes(k) || k.startsWith('details[') || k.startsWith('detail_');
+
+    const receivedBodyKeys = Object.keys(req.body || {});
+    const receivedFileFields = Array.isArray(req.files)
+      ? [...new Set(req.files.map((f) => f.fieldname).filter(Boolean))]
+      : req.files && typeof req.files === 'object'
+        ? Object.keys(req.files)
+        : [];
+    const extraBodyKeys = receivedBodyKeys.filter((k) => !isAllowedBodyKey(k));
+
+    if (extraBodyKeys.length > 0) {
+      return res.status(400).json({
+        success: false,
+        code: 'EXTRA_FIELDS_NOT_ALLOWED',
+        message: 'Extra fields not allowed',
+        receivedBodyKeys,
+        allowedBodyKeys: [...ALLOWED_BODY_KEYS, 'details[key]', 'detail_*'],
+        extraBodyKeys,
+        receivedFileFields,
+      });
+    }
+
     // Robust extraction from multipart body
     const title = (req.body.title || '').trim();
     const description = (req.body.description || '').trim();
@@ -496,6 +521,12 @@ export const createAd = async (req, res, next) => {
           message: 'Extra fields not allowed',
           fieldErrors: { details: `Invalid fields: ${invalidKeys.join(', ')}` },
           invalidKeys,
+          receivedBodyKeys: Object.keys(req.body || {}),
+          receivedFileFields: Array.isArray(req.files)
+            ? [...new Set(req.files.map((f) => f.fieldname).filter(Boolean))]
+            : req.files && typeof req.files === 'object'
+              ? Object.keys(req.files)
+              : [],
         });
       }
 
