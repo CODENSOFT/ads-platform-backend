@@ -44,7 +44,7 @@ const checkExtraFields = (allowedFields) => {
 
 // Check if at least one valid field is provided
 const checkAtLeastOneField = (req, res, next) => {
-  const allowedFields = ['title', 'description', 'price', 'currency', 'categorySlug', 'subCategorySlug', 'attributes'];
+  const allowedFields = ['title', 'description', 'price', 'currency', 'categorySlug', 'subCategorySlug', 'attributes', 'details'];
   const bodyKeys = Object.keys(req.body || {});
   const hasValidField = bodyKeys.some((key) => allowedFields.includes(key));
 
@@ -68,7 +68,7 @@ const checkAtLeastOneField = (req, res, next) => {
  */
 export const validateAdUpdate = [
   // Check for extra fields first - only allow title, description, price, currency, categorySlug, subCategorySlug, attributes
-  checkExtraFields(['title', 'description', 'price', 'currency', 'categorySlug', 'subCategorySlug', 'attributes']),
+  checkExtraFields(['title', 'description', 'price', 'currency', 'categorySlug', 'subCategorySlug', 'attributes', 'details']),
 
   // Check that at least one field is provided
   checkAtLeastOneField,

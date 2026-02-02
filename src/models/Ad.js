@@ -42,6 +42,10 @@ const adSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+    details: {
+      type: Object,
+      default: {},
+    },
     status: {
       type: String,
       enum: ['draft', 'active', 'sold'],
@@ -89,7 +93,7 @@ adSchema.pre('save', function () {
 
 // Prevent setting unknown fields in update operations
 adSchema.pre(['updateOne', 'findOneAndUpdate'], function () {
-  const allowedFields = ['title', 'description', 'price', 'currency', 'images', 'status', 'isDeleted', 'categorySlug', 'subCategorySlug', 'attributes'];
+  const allowedFields = ['title', 'description', 'price', 'currency', 'images', 'status', 'isDeleted', 'categorySlug', 'subCategorySlug', 'attributes', 'details'];
   const update = this.getUpdate();
   
   if (update.$set) {

@@ -7,6 +7,7 @@ import { AppError } from '../middlewares/error.middleware.js';
 import cloudinary from '../config/cloudinary.js';
 import logger from '../config/logger.js';
 import { validateAttributesAgainstCategory } from '../utils/attributeValidator.js';
+import { getAllowedFields, validateDetails } from '../utils/detailsValidator.js';
 
 /**
  * Escape regex special characters to prevent regex injection
@@ -36,6 +37,25 @@ const normalizeString = (v) => {
  * @returns {object} Plain object or {}
  */
 const parseAttributes = (raw) => {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+/**
+ * Parse details from request body (multipart may send stringified JSON).
+ * @param {*} raw - req.body.details
+ * @returns {object} Plain object or {}
+ */
+const parseDetails = (raw) => {
   if (raw === undefined || raw === null) return {};
   if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
@@ -335,6 +355,7 @@ export const createAd = async (req, res, next) => {
       categorySlug: req.body.categorySlug,
       subCategorySlug: req.body.subCategorySlug,
       attributes: parseAttributes(req.body.attributes),
+      details: parseDetails(req.body.details),
     };
 
     // Validate required fields
@@ -366,6 +387,19 @@ export const createAd = async (req, res, next) => {
       );
     }
 
+    // Validate category/subcategory-specific details (getAllowedFields + validateDetails)
+    const categoryPlain = category.toObject ? category.toObject() : category;
+    const subSlug = allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() ? allowedFields.subCategorySlug.trim().toLowerCase() : '';
+    const allowedFieldsList = getAllowedFields(categoryPlain, subSlug);
+    const { cleanedDetails, fieldErrors } = validateDetails(allowedFields.details, allowedFieldsList);
+    if (Object.keys(fieldErrors).length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        details: { fieldErrors },
+      });
+    }
+
     // Validate that images array exists and is not empty (set by uploadToCloudinary middleware)
     const images = req.body.images;
     if (!images || !Array.isArray(images) || images.length === 0) {
@@ -385,6 +419,7 @@ export const createAd = async (req, res, next) => {
       categorySlug: allowedFields.categorySlug.trim(),
       ...(allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() && { subCategorySlug: allowedFields.subCategorySlug.trim() }),
       attributes: allowedFields.attributes,
+      details: cleanedDetails,
 
       images,
       status: 'draft',
@@ -569,8 +604,9 @@ export const updateAd = async (req, res, next) => {
     }
 
     // Extract ONLY allowed fields from request body
-    const { title, description, price, currency, categorySlug, subCategorySlug, attributes: rawAttributes } = req.body;
+    const { title, description, price, currency, categorySlug, subCategorySlug, attributes: rawAttributes, details: rawDetails } = req.body;
     const attributes = rawAttributes !== undefined ? parseAttributes(rawAttributes) : undefined;
+    const details = rawDetails !== undefined ? parseDetails(rawDetails) : undefined;
 
     const hasUpdates =
       title !== undefined ||
@@ -579,7 +615,8 @@ export const updateAd = async (req, res, next) => {
       currency !== undefined ||
       categorySlug !== undefined ||
       subCategorySlug !== undefined ||
-      rawAttributes !== undefined;
+      rawAttributes !== undefined ||
+      rawDetails !== undefined;
 
     if (!hasUpdates) {
       return next(
@@ -607,6 +644,26 @@ export const updateAd = async (req, res, next) => {
         }
       }
       ad.attributes = attributes && typeof attributes === 'object' ? attributes : {};
+    }
+
+    // When details are being updated, validate against category + optional subcategory (effective after update)
+    if (details !== undefined) {
+      const categoryForDetails = await Category.findOne({ slug: effectiveCategorySlug.toLowerCase() }).lean();
+      if (categoryForDetails) {
+        const effectiveSubSlug = (subCategorySlug !== undefined ? String(subCategorySlug).trim() : (ad.subCategorySlug || '').toString().trim()).toLowerCase();
+        const allowedFieldsList = getAllowedFields(categoryForDetails, effectiveSubSlug);
+        const { cleanedDetails: cleanedDetailsUpdate, fieldErrors: detailsFieldErrors } = validateDetails(details, allowedFieldsList);
+        if (Object.keys(detailsFieldErrors).length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Validation error',
+            details: { fieldErrors: detailsFieldErrors },
+          });
+        }
+        ad.details = cleanedDetailsUpdate;
+      } else {
+        ad.details = details && typeof details === 'object' ? details : {};
+      }
     }
 
     if (title !== undefined) ad.title = title.trim();

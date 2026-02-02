@@ -46,7 +46,7 @@ const checkExtraFields = (allowedFields) => {
 export const validateCreateAd = [
   // Check for extra fields first - status is NOT allowed at creation
   // Only categorySlug and subCategorySlug are accepted (not category/subcategory)
-  checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'categorySlug', 'subCategorySlug', 'attributes']),
+  checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'categorySlug', 'subCategorySlug', 'attributes', 'details']),
   
   // Validate title
   body('title')

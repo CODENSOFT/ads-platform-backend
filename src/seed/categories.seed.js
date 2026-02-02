@@ -6,37 +6,47 @@ const CATEGORIES = [
     name: 'Automobile',
     slug: 'automobiles',
     fields: [
-      { key: 'make', label: 'Marca', type: 'text', required: true, placeholder: 'ex. BMW' },
-      { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'ex. Seria 3' },
+      { key: 'brand', label: 'Marca', type: 'text', required: true, placeholder: 'ex. BMW', unit: '' },
+      { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'ex. Seria 3', unit: '' },
       { key: 'year', label: 'An', type: 'number', required: true, min: 1900, max: 2030, unit: 'an' },
-      { key: 'engineCapacity', label: 'Capacitate cilindrică', type: 'number', required: false, min: 0, max: 10000, unit: 'cm³' },
+      { key: 'engineCc', label: 'Capacitate motor', type: 'number', required: false, min: 0, max: 10000, unit: 'cc' },
       { key: 'registration', label: 'Înmatriculat', type: 'select', required: false, options: ['Da', 'Nu'] },
       { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Bună', 'Acceptabilă', 'De reparații'] },
-      { key: 'sellerType', label: 'Tip vânzător', type: 'select', required: false, options: ['Persoană fizică', 'Dealer'] },
-      { key: 'steeringWheel', label: 'Volan', type: 'select', required: false, options: ['Stânga', 'Dreapta'] },
+      { key: 'sellerType', label: 'Tip vânzător', type: 'select', required: false, options: ['person', 'company'] },
+      { key: 'steering', label: 'Volan', type: 'select', required: false, options: ['left', 'right'] },
       { key: 'bodyType', label: 'Caroserie', type: 'select', required: false, options: ['Sedan', 'SUV', 'Hatchback', 'Break', 'Coupe', 'Cabrio', 'Monovolume', 'Pick-up', 'Altele'] },
-      { key: 'seats', label: 'Număr locuri', type: 'number', required: false, min: 1, max: 50 },
-      { key: 'mileage', label: 'Kilometraj', type: 'number', required: false, min: 0, unit: 'km' },
+      { key: 'seats', label: 'Locuri', type: 'number', required: false, min: 1, max: 50 },
+      { key: 'mileageKm', label: 'Kilometraj', type: 'number', required: false, min: 0, unit: 'km' },
       { key: 'fuelType', label: 'Combustibil', type: 'select', required: false, options: ['Benzină', 'Motorină', 'GPL', 'Electric', 'Hibrid', 'Hibrid plug-in'] },
       { key: 'gearbox', label: 'Cutie de viteze', type: 'select', required: false, options: ['Manuală', 'Automată', 'Semi-automată'] },
-      { key: 'driveType', label: 'Tracțiune', type: 'select', required: false, options: ['Față', 'Spate', 'Integrală 4x4'] },
+      { key: 'drivetrain', label: 'Tracțiune', type: 'select', required: false, options: ['Față', 'Spate', 'Integrală 4x4'] },
       { key: 'color', label: 'Culoare', type: 'text', required: false, placeholder: 'ex. Negru' },
+    ],
+    subcategories: [
+      { slug: 'cars', name: 'Autoturisme', fields: [] },
+      { slug: 'motorcycles', name: 'Motociclete', fields: [{ key: 'engineStroke', label: '2T / 4T', type: 'select', required: false, options: ['2T', '4T'] }] },
+      { slug: 'trucks-buses', name: 'Camioane & autobuze', fields: [{ key: 'payloadTons', label: 'Capacitate tonaj', type: 'number', required: false, min: 0, unit: 't' }] },
     ],
   },
   {
     name: 'Imobiliare',
-    slug: 'real-estate',
+    slug: 'imobiliare',
     fields: [
-      { key: 'propertyType', label: 'Tip proprietate', type: 'select', required: true, options: ['Apartament', 'Casă', 'Vilă', 'Teren', 'Spațiu comercial', 'Birou', 'Garaj'] },
-      { key: 'areaSqm', label: 'Suprafață', type: 'number', required: true, min: 0, unit: 'm²' },
-      { key: 'rooms', label: 'Număr camere', type: 'number', required: false, min: 0, max: 50 },
+      { key: 'propertyType', label: 'Tip proprietate', type: 'select', required: true, options: ['apartment', 'house', 'land', 'commercial'] },
+      { key: 'areaM2', label: 'Suprafață', type: 'number', required: true, min: 0, unit: 'm2' },
+      { key: 'rooms', label: 'Camere', type: 'number', required: false, min: 0, max: 50 },
       { key: 'floor', label: 'Etaj', type: 'number', required: false, min: -5, max: 200 },
-      { key: 'totalFloors', label: 'Etaje total clădire', type: 'number', required: false, min: 0, max: 200 },
-      { key: 'furnished', label: 'Mobilat', type: 'select', required: false, options: ['Da', 'Nu', 'Parțial'] },
-      { key: 'heating', label: 'Încălzire', type: 'select', required: false, options: ['Centrală', 'Individuală', 'Gaz', 'Electric', 'Pompă căldură', 'Altele'] },
-      { key: 'builtYear', label: 'An construcție', type: 'number', required: false, min: 1800, max: 2030 },
-      { key: 'negotiable', label: 'Negociabil', type: 'boolean', required: false },
-      { key: 'location', label: 'Locație', type: 'text', required: false, placeholder: 'Oraș, zonă' },
+      { key: 'totalFloors', label: 'Etaje total', type: 'number', required: false, min: 0, max: 200 },
+      { key: 'condition', label: 'Stare', type: 'select', required: false, options: ['Nou', 'Renovat', 'Bună', 'Acceptabilă', 'De recondiționat'] },
+      { key: 'sellerType', label: 'Tip vânzător', type: 'select', required: false, options: ['person', 'company'] },
+      { key: 'city', label: 'Oraș', type: 'text', required: false },
+      { key: 'district', label: 'Cartier / Sector', type: 'text', required: false },
+    ],
+    subcategories: [
+      { slug: 'apartments-sale', name: 'Apartamente vânzare', fields: [{ key: 'furnished', label: 'Mobilat', type: 'select', required: false, options: ['Da', 'Nu', 'Parțial'] }] },
+      { slug: 'apartments-rent', name: 'Apartamente închiriat', fields: [{ key: 'furnished', label: 'Mobilat', type: 'select', required: false, options: ['Da', 'Nu', 'Parțial'] }, { key: 'leaseMonths', label: 'Perioadă minimă (luni)', type: 'number', required: false, min: 1, unit: '' }] },
+      { slug: 'houses-villas', name: 'Case & vile', fields: [{ key: 'plotM2', label: 'Teren anexă (m²)', type: 'number', required: false, min: 0, unit: 'm2' }] },
+      { slug: 'lands', name: 'Terenuri', fields: [{ key: 'zone', label: 'Zonă (destinație)', type: 'text', required: false }] },
     ],
   },
   {
@@ -48,7 +58,12 @@ const CATEGORIES = [
       { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Bună', 'Acceptabilă', 'Defect'] },
       { key: 'warranty', label: 'Garanție', type: 'select', required: false, options: ['Da', 'Nu'] },
       { key: 'warrantyMonths', label: 'Luni garanție', type: 'number', required: false, min: 0, max: 120 },
-      { key: 'category', label: 'Tip produs', type: 'select', required: false, options: ['Telefon', 'Laptop', 'Tabletă', 'TV', 'Audio', 'Electrocasnic mare', 'Electrocasnic mic', 'Gadget', 'Console & jocuri', 'Altele'] },
+      { key: 'productType', label: 'Tip produs', type: 'select', required: false, options: ['Telefon', 'Laptop', 'Tabletă', 'TV', 'Audio', 'Electrocasnic mare', 'Electrocasnic mic', 'Gadget', 'Console & jocuri', 'Altele'] },
+    ],
+    subcategories: [
+      { slug: 'phones', name: 'Telefoane mobile', fields: [{ key: 'screenSize', label: 'Diagonală ecran (inch)', type: 'number', required: false, min: 0, unit: '' }] },
+      { slug: 'laptops-pc', name: 'Laptopuri & PC', fields: [{ key: 'ramGb', label: 'RAM (GB)', type: 'number', required: false, min: 0, unit: 'gb' }, { key: 'storageGb', label: 'Stocare (GB)', type: 'number', required: false, min: 0, unit: 'gb' }] },
+      { slug: 'tvs', name: 'Televizoare', fields: [{ key: 'screenSizeInch', label: 'Diagonală (inch)', type: 'number', required: false, min: 0, unit: '' }] },
     ],
   },
   {
@@ -59,6 +74,11 @@ const CATEGORIES = [
       { key: 'material', label: 'Material', type: 'text', required: false, placeholder: 'ex. Lemn, metal' },
       { key: 'dimensions', label: 'Dimensiuni', type: 'text', required: false, placeholder: 'ex. 120x80 cm' },
       { key: 'category', label: 'Categorie', type: 'select', required: false, options: ['Mobilă', 'Decorațiuni', 'Textile', 'Unelte', 'Materiale construcții', 'Grădinărit', 'Iluminat', 'Încălzire', 'Altele'] },
+    ],
+    subcategories: [
+      { slug: 'furniture', name: 'Mobilă', fields: [{ key: 'room', label: 'Cameră', type: 'select', required: false, options: ['Living', 'Dormitor', 'Bucătărie', 'Birou', 'Copii', 'Altele'] }] },
+      { slug: 'tools', name: 'Unelte & scule', fields: [{ key: 'powerType', label: 'Alimentare', type: 'select', required: false, options: ['Electric', 'Benzină', 'Manual', 'Baterie'] }] },
+      { slug: 'gardening', name: 'Grădinărit', fields: [{ key: 'outdoor', label: 'Exterior / Interior', type: 'select', required: false, options: ['Exterior', 'Interior', 'Ambele'] }] },
     ],
   },
   {
@@ -71,6 +91,12 @@ const CATEGORIES = [
       { key: 'color', label: 'Culoare', type: 'text', required: false, placeholder: 'ex. Negru' },
       { key: 'material', label: 'Material', type: 'text', required: false, placeholder: 'ex. Bumbac, piele' },
       { key: 'category', label: 'Categorie', type: 'select', required: false, options: ['Îmbrăcăminte femei', 'Îmbrăcăminte bărbați', 'Îmbrăcăminte copii', 'Încălțăminte', 'Genți & accesorii', 'Ceasuri', 'Bijuterii', 'Cosmetice', 'Altele'] },
+    ],
+    subcategories: [
+      { slug: 'women-clothing', name: 'Îmbrăcăminte femei', fields: [] },
+      { slug: 'men-clothing', name: 'Îmbrăcăminte bărbați', fields: [] },
+      { slug: 'shoes', name: 'Încălțăminte', fields: [{ key: 'shoeSize', label: 'Număr', type: 'text', required: false, placeholder: 'ex. 42, 42.5' }] },
+      { slug: 'watches', name: 'Ceasuri', fields: [{ key: 'watchType', label: 'Tip', type: 'select', required: false, options: ['Cu cureaua', 'Sport', 'Smartwatch', 'Clasic'] }] },
     ],
   },
   {
@@ -87,12 +113,17 @@ const CATEGORIES = [
       { key: 'remote', label: 'Remote', type: 'select', required: false, options: ['Da', 'Nu', 'Hibrid'] },
       { key: 'companyName', label: 'Companie', type: 'text', required: false, placeholder: 'Nume firmă' },
     ],
+    subcategories: [
+      { slug: 'it', name: 'IT & Tehnologie', fields: [{ key: 'techStack', label: 'Tehnologii', type: 'textarea', required: false, placeholder: 'ex. React, Node.js' }] },
+      { slug: 'sales-marketing', name: 'Vânzări & marketing', fields: [] },
+      { slug: 'freelance', name: 'Freelance & remote', fields: [{ key: 'projectType', label: 'Tip proiect', type: 'select', required: false, options: ['One-time', 'Recurring', 'Ongoing'] }] },
+    ],
   },
 ];
 
 /**
- * Ensures all 6 categories exist in the database.
- * Upserts by slug (creates if missing, updates fields if slug exists).
+ * Ensures all categories exist with fields and subcategories.
+ * Upserts by slug (creates if missing, updates name, fields, subcategories if slug exists).
  */
 export const seedCategories = async () => {
   try {
@@ -101,7 +132,7 @@ export const seedCategories = async () => {
     for (const cat of CATEGORIES) {
       const result = await Category.findOneAndUpdate(
         { slug: cat.slug },
-        { $set: { name: cat.name, fields: cat.fields } },
+        { $set: { name: cat.name, fields: cat.fields, subcategories: cat.subcategories || [] } },
         { new: true, upsert: true, runValidators: true }
       );
       if (result.createdAt?.getTime() === result.updatedAt?.getTime()) {
