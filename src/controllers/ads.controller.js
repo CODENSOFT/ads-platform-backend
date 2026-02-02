@@ -486,7 +486,19 @@ export const createAd = async (req, res, next) => {
       const baseFields = Array.isArray(category.fields) ? category.fields : [];
       const subFields = Array.isArray(sub?.fields) ? sub.fields : [];
       const fields = mergeFieldsByKey(baseFields, subFields);
-      const { sanitized: sanitizedDetails, fieldErrors: detailErrs } = validateDetails(fields, detailsObj, { categorySlug });
+      const { sanitized: sanitizedDetails, fieldErrors: detailErrs, invalidKeys } = validateDetails(fields, detailsObj, { categorySlug });
+
+      // Extra fields not allowed: keys in details not in category/subcategory schema
+      if (invalidKeys && invalidKeys.length > 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'EXTRA_FIELDS_NOT_ALLOWED',
+          message: 'Extra fields not allowed',
+          fieldErrors: { details: `Invalid fields: ${invalidKeys.join(', ')}` },
+          invalidKeys,
+        });
+      }
+
       Object.assign(fieldErrors, detailErrs);
 
       // Attributes validation (optional)

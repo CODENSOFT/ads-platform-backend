@@ -162,12 +162,13 @@ export function sanitizeAndValidateDetails(fields, details) {
 }
 
 /**
- * Validate details against field definitions and return sanitized object + field-level errors.
- * Does not throw; collects all errors. Keys in fieldErrors use "detail_<key>" for frontend.
+ * Validate details against field definitions and return sanitized object + field-level errors + invalid keys.
+ * Keys in details not in schema are returned as invalidKeys (extra fields not allowed).
+ * Keys in fieldErrors use "detail_<key>" for frontend.
  * @param {array} fields - Merged field definitions (category + subcategory)
  * @param {object} details - Raw details from request
  * @param {{ categorySlug?: string }} [options] - e.g. { categorySlug: 'educatie-cursuri' } for special rules
- * @returns {{ sanitized: object, fieldErrors: object }}
+ * @returns {{ sanitized: object, fieldErrors: object, invalidKeys: string[] }}
  */
 export function validateDetails(fields, details, options = {}) {
   const raw = details && typeof details === 'object' && !Array.isArray(details) ? details : {};
@@ -176,7 +177,9 @@ export function validateDetails(fields, details, options = {}) {
   const fieldList = Array.isArray(fields) ? fields : [];
   const fieldMap = new Map(fieldList.map((f) => [f.key, f]));
 
-  // Strip unknown keys (only validate/sanitize known keys)
+  // Keys in details not in category/subcategory schema = extra fields not allowed
+  const invalidKeys = Object.keys(raw).filter((key) => !fieldMap.has(key));
+
   for (const field of fieldList) {
     const key = field.key;
     const errKey = `detail_${key}`;
@@ -296,5 +299,5 @@ export function validateDetails(fields, details, options = {}) {
     }
   }
 
-  return { sanitized, fieldErrors };
+  return { sanitized, fieldErrors, invalidKeys };
 }
