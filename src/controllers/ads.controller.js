@@ -99,6 +99,40 @@ export const getAds = async (req, res, next) => {
     if (categorySlug) q.categorySlug = categorySlug;
     if (subCategorySlug) q.subCategorySlug = subCategorySlug;
 
+    // Dynamic details filters: details.field (exact) or details.field_min / details.field_max (range)
+    const detailsFilters = {};
+    const queryEntries = Object.entries(req.query).filter(([k, v]) => v !== undefined && v !== null && v !== '' && k.startsWith('details.'));
+    for (const [key, value] of queryEntries) {
+      const rest = key.slice(8);
+      if (rest.endsWith('_min')) {
+        const field = rest.slice(0, -4);
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          if (!detailsFilters[field] || typeof detailsFilters[field] !== 'object' || Array.isArray(detailsFilters[field])) detailsFilters[field] = {};
+          detailsFilters[field].$gte = num;
+        }
+      } else if (rest.endsWith('_max')) {
+        const field = rest.slice(0, -4);
+        const num = Number(value);
+        if (!Number.isNaN(num)) {
+          if (!detailsFilters[field] || typeof detailsFilters[field] !== 'object' || Array.isArray(detailsFilters[field])) detailsFilters[field] = {};
+          detailsFilters[field].$lte = num;
+        }
+      }
+    }
+    for (const [key, value] of queryEntries) {
+      const rest = key.slice(8);
+      if (rest.endsWith('_min') || rest.endsWith('_max')) continue;
+      const str = String(value).trim();
+      if (str === '' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') continue;
+      if (detailsFilters[rest] && typeof detailsFilters[rest] === 'object' && !Array.isArray(detailsFilters[rest]) && ('$gte' in detailsFilters[rest] || '$lte' in detailsFilters[rest])) continue;
+      const num = Number(value);
+      detailsFilters[rest] = !Number.isNaN(num) ? num : str;
+    }
+    for (const [field, cond] of Object.entries(detailsFilters)) {
+      q[`details.${field}`] = cond;
+    }
+
     // Search: title OR description (case-insensitive, regex escaped)
     if (search) {
       const searchEscaped = escapeRegex(search);

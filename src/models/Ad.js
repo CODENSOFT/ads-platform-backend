@@ -43,7 +43,7 @@ const adSchema = new mongoose.Schema(
       default: {},
     },
     details: {
-      type: Object,
+      type: mongoose.Schema.Types.Mixed,
       default: {},
     },
     status: {
