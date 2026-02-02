@@ -522,29 +522,34 @@ export const createAd = async (req, res, next) => {
         fields = mergeFieldsByKey([], allSubFields);
       }
 
-      const { sanitized: sanitizedDetails, fieldErrors: detailErrs, invalidKeys } = validateDetails(fields, detailsObj, { categorySlug });
-      const allowedDetailKeys = fields.map((f) => f.key);
-
-      // Extra fields not allowed: keys in details not in category/subcategory schema
-      if (invalidKeys && invalidKeys.length > 0) {
-        return res.status(400).json({
-          success: false,
-          code: 'EXTRA_FIELDS_NOT_ALLOWED',
-          message: 'Extra fields not allowed',
-          fieldErrors: { details: `Invalid fields: ${invalidKeys.join(', ')}. Allowed for this category: ${allowedDetailKeys.join(', ') || 'none'}` },
-          invalidKeys,
-          allowedDetailKeys,
-          suggestedFix: `Remove or rename these keys in details: ${invalidKeys.join(', ')}. Use only: ${allowedDetailKeys.join(', ') || '—'}`,
-          receivedBodyKeys: Object.keys(req.body || {}),
-          receivedFileFields: Array.isArray(req.files)
-            ? [...new Set(req.files.map((f) => f.fieldname).filter(Boolean))]
-            : req.files && typeof req.files === 'object'
-              ? Object.keys(req.files)
-              : [],
-        });
+      let sanitizedDetails = {};
+      if (fields.length === 0) {
+        // FALLBACK: category has no schema yet -> accept details as-is
+        sanitizedDetails = detailsObj && typeof detailsObj === 'object' && !Array.isArray(detailsObj) ? { ...detailsObj } : {};
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[CREATE_AD] fallback (no schema)', { categorySlug, detailsKeys: Object.keys(sanitizedDetails), mergedFieldsCount: 0 });
+        }
+      } else {
+        const result = validateDetails(fields, detailsObj, { categorySlug });
+        sanitizedDetails = result.sanitized || {};
+        if (result.invalidKeys && result.invalidKeys.length > 0) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('[CREATE_AD] INVALID_DETAILS_KEYS', { categorySlug, invalidKeys: result.invalidKeys, detailsKeys: Object.keys(detailsObj), mergedFieldsCount: fields.length });
+          }
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_DETAILS_KEYS',
+            message: 'Invalid details keys for this category',
+            fieldErrors: { details: `Invalid fields: ${result.invalidKeys.join(', ')}` },
+            invalidKeys: result.invalidKeys,
+            allowedDetailKeys: fields.map((f) => f.key),
+          });
+        }
+        Object.assign(fieldErrors, result.fieldErrors || {});
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[CREATE_AD] schema validation', { categorySlug, mergedFieldsCount: fields.length, detailsKeys: Object.keys(sanitizedDetails) });
+        }
       }
-
-      Object.assign(fieldErrors, detailErrs);
 
       // Attributes validation (optional)
       const attributes = parseAttributes(req.body.attributes);
