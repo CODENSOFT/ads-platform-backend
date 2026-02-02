@@ -102,9 +102,10 @@ export const errorHandler = (err, req, res, next) => {
     error = err;
   }
 
-  // Default error response
+  // Default error response (never send empty 400)
   const statusCode = error.statusCode || 500;
-  const message = error.message || 'Internal server error';
+  let message = error.message || 'Internal server error';
+  if (statusCode === 400 && !message) message = 'Bad request';
   const details = error.details || null;
 
   // Production: Don't expose stack trace or internal errors

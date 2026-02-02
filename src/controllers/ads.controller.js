@@ -7,7 +7,7 @@ import { AppError } from '../middlewares/error.middleware.js';
 import cloudinary from '../config/cloudinary.js';
 import logger from '../config/logger.js';
 import { validateAttributesAgainstCategory } from '../utils/attributeValidator.js';
-import { mergeFieldsByKey, sanitizeAndValidateDetails, DetailsValidationError } from '../utils/dynamicDetails.js';
+import { mergeFieldsByKey, validateDetails } from '../utils/dynamicDetails.js';
 
 /**
  * Escape regex special characters to prevent regex injection
@@ -373,7 +373,6 @@ export const getAdById = async (req, res, next) => {
 
 export const createAd = async (req, res, next) => {
   try {
-    // Ensure req.user exists and has id
     if (!req.user || !req.user.id) {
       return next(
         new AppError('Authentication required', 401, {
@@ -382,144 +381,147 @@ export const createAd = async (req, res, next) => {
       );
     }
 
-    // Prevent status modification at creation - always create as draft
     if (req.body.status) {
-      return next(
-        new AppError('Cannot set status during creation. Ad is created as draft', 400, {
-          type: 'STATUS_NOT_ALLOWED',
-        })
-      );
+      return res.status(400).json({
+        success: false,
+        code: 'STATUS_NOT_ALLOWED',
+        message: 'Cannot set status during creation. Ad is created as draft',
+        fieldErrors: { status: 'Status cannot be set on create' },
+      });
     }
 
-    // Extract ONLY allowed fields from request body
-    // Strict filtering to prevent injection of protected fields
-    const allowedFields = {
-      title: req.body.title,
-      description: req.body.description,
-      price: req.body.price,
-      currency: req.body.currency,
-      categorySlug: req.body.categorySlug,
-      subCategorySlug: req.body.subCategorySlug,
-      attributes: parseAttributes(req.body.attributes),
-      details: parseDetails(req.body.details),
-    };
+    // Robust extraction from multipart body
+    const title = (req.body.title || '').trim();
+    const description = (req.body.description || '').trim();
+    const priceRaw = req.body.price;
+    const currency = (req.body.currency || 'EUR').trim();
+    const categorySlug = (req.body.categorySlug || '').trim().toLowerCase();
+    const subCategorySlug = (req.body.subCategorySlug || '').trim().toLowerCase();
+    const detailsRaw = req.body.details;
 
-    // Validate required fields
-    if (!allowedFields.title || !allowedFields.description || allowedFields.price === undefined || !allowedFields.categorySlug) {
-      return next(
-        new AppError('Title, description, price, and categorySlug are required', 400, {
-          type: 'MISSING_REQUIRED_FIELDS',
-        })
-      );
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[CREATE_AD] body keys:', Object.keys(req.body || {}));
+      console.log('[CREATE_AD] categorySlug:', categorySlug, 'subCategorySlug:', subCategorySlug);
+      console.log('[CREATE_AD] detailsRaw type:', typeof detailsRaw);
     }
 
-    // Load category (unknown categorySlug => 400)
-    const category = await Category.findOne({ slug: allowedFields.categorySlug.trim().toLowerCase() });
-    if (!category) {
-      return next(
-        new AppError('Category not found', 400, {
-          type: 'CATEGORY_NOT_FOUND',
-          categorySlug: allowedFields.categorySlug,
-        })
-      );
-    }
-    const attrValidation = await validateAttributesAgainstCategory(allowedFields.categorySlug.trim(), allowedFields.attributes);
-    if (!attrValidation.valid) {
-      return next(
-        new AppError('Attribute validation failed', 400, {
-          type: 'ATTRIBUTE_VALIDATION',
-          errors: attrValidation.errors,
-        })
-      );
-    }
+    const fieldErrors = {};
 
-    // Validate subCategorySlug if provided (invalid => 400)
-    const subSlug = allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() ? allowedFields.subCategorySlug.trim().toLowerCase() : '';
-    let subcategory = null;
-    if (subSlug) {
-      const subs = Array.isArray(category.subcategories) ? category.subcategories : [];
-      subcategory = subs.find((s) => (s.slug || '').toString().toLowerCase() === subSlug);
-      if (!subcategory) {
-        return next(
-          new AppError('Invalid subcategory for this category', 400, {
-            type: 'INVALID_SUBCATEGORY',
-            subCategorySlug: allowedFields.subCategorySlug,
-          })
-        );
-      }
-    }
-
-    // Merge category + subcategory fields, sanitize and validate details
-    const categoryPlain = category.toObject ? category.toObject() : category;
-    const baseFields = Array.isArray(categoryPlain.fields) ? categoryPlain.fields : [];
-    const subFields = subcategory && Array.isArray(subcategory.fields) ? subcategory.fields : [];
-    const mergedFields = mergeFieldsByKey(baseFields, subFields);
-    let sanitizedDetails = {};
-    try {
-      const result = sanitizeAndValidateDetails(mergedFields, allowedFields.details);
-      sanitizedDetails = result.sanitizedDetails;
-    } catch (err) {
-      if (err instanceof DetailsValidationError) {
+    // Parse details safely
+    let detailsObj = {};
+    if (typeof detailsRaw === 'string' && detailsRaw.trim()) {
+      try {
+        detailsObj = JSON.parse(detailsRaw);
+        if (typeof detailsObj !== 'object' || detailsObj === null || Array.isArray(detailsObj)) {
+          detailsObj = {};
+        }
+      } catch (e) {
         return res.status(400).json({
           success: false,
-          message: err.message,
-          fieldKey: err.fieldKey,
-          ...(err.allowedOptions && { allowedOptions: err.allowedOptions }),
+          code: 'INVALID_DETAILS_JSON',
+          message: 'Invalid details JSON',
+          fieldErrors: { details: 'Details must be valid JSON' },
         });
       }
-      throw err;
+    } else if (detailsRaw && typeof detailsRaw === 'object' && !Array.isArray(detailsRaw)) {
+      detailsObj = detailsRaw;
     }
 
-    if (process.env.NODE_ENV !== 'production' && Object.keys(sanitizedDetails).length > 0) {
-      logger.info('createAd details validated', { categorySlug: allowedFields.categorySlug, keys: Object.keys(sanitizedDetails) });
-    }
+    // Basic field validation
+    if (!title) fieldErrors.title = 'Title is required';
+    else if (title.length < 3 || title.length > 120) fieldErrors.title = 'Title must be between 3 and 120 characters';
+    if (!description) fieldErrors.description = 'Description is required';
+    else if (description.length < 20) fieldErrors.description = 'Description must be at least 20 characters';
+    const priceNum = priceRaw !== undefined && priceRaw !== null && priceRaw !== '' ? Number(priceRaw) : NaN;
+    if (priceRaw === undefined || priceRaw === null || priceRaw === '') fieldErrors.price = 'Price is required';
+    else if (!Number.isFinite(priceNum) || priceNum < 0) fieldErrors.price = 'Price must be a positive number';
+    const allowedCurrencies = ['EUR', 'USD', 'MDL'];
+    if (currency && !allowedCurrencies.includes(currency)) fieldErrors.currency = 'Currency must be one of: EUR, USD, MDL';
 
-    // Validate that images array exists and is not empty (set by uploadToCloudinary middleware)
     const images = req.body.images;
     if (!images || !Array.isArray(images) || images.length === 0) {
-      return next(
-        new AppError('At least one image is required', 400, {
-          type: 'IMAGES_REQUIRED',
-        })
-      );
+      fieldErrors.images = 'At least one image is required';
     }
 
-    // Create controlled ad object with ONLY allowed fields
-    const adData = {
-      title: allowedFields.title.trim(),
-      description: allowedFields.description.trim(),
-      price: parseFloat(allowedFields.price),
-      currency: allowedFields.currency || 'EUR',
-      categorySlug: allowedFields.categorySlug.trim(),
-      ...(allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() && { subCategorySlug: allowedFields.subCategorySlug.trim() }),
-      attributes: allowedFields.attributes,
-      details: sanitizedDetails,
-
-      images,
-      status: 'draft',
-      user: req.user.id,
-    };
-
-    // Validate price is a valid number
-    if (isNaN(adData.price) || adData.price < 0) {
-      return next(
-        new AppError('Price must be a valid positive number', 400, {
-          type: 'INVALID_PRICE',
-        })
-      );
+    if (!categorySlug) {
+      fieldErrors.categorySlug = 'Category is required';
     }
 
-    // Create ad using controlled object (no protected fields from request)
-    const ad = await Ad.create(adData);
+    // Load category (including fields + subcategories.fields)
+    let category = null;
+    if (categorySlug) {
+      category = await Category.findOne({ slug: categorySlug }).lean();
+      if (!category) {
+        fieldErrors.categorySlug = 'Category not found';
+      }
+    }
 
-    const populatedAd = await Ad.findById(ad._id).populate('user', 'name email');
+    let sub = null;
+    if (categorySlug && subCategorySlug && category) {
+      const subs = Array.isArray(category.subcategories) ? category.subcategories : [];
+      sub = subs.find((s) => (s.slug || '').toLowerCase() === subCategorySlug);
+      if (!sub) {
+        fieldErrors.subCategorySlug = 'Subcategory not found for this category';
+      }
+    }
 
-    res.status(201).json({
-      success: true,
-      message: 'Ad created successfully',
-      ad: populatedAd,
+    // Merge schema fields and validate details (only if category loaded)
+    if (category && Object.keys(fieldErrors).length === 0) {
+      const baseFields = Array.isArray(category.fields) ? category.fields : [];
+      const subFields = Array.isArray(sub?.fields) ? sub.fields : [];
+      const fields = mergeFieldsByKey(baseFields, subFields);
+      const { sanitized: sanitizedDetails, fieldErrors: detailErrs } = validateDetails(fields, detailsObj, { categorySlug });
+      Object.assign(fieldErrors, detailErrs);
+
+      // Attributes validation (optional)
+      const attributes = parseAttributes(req.body.attributes);
+      const attrValidation = await validateAttributesAgainstCategory(categorySlug, attributes);
+      if (!attrValidation.valid && attrValidation.errors?.length) {
+        fieldErrors.attributes = attrValidation.errors.map((e) => e.message || e).join('; ');
+      }
+
+      // If no validation errors, create ad
+      if (Object.keys(fieldErrors).length === 0) {
+        const adData = {
+          title,
+          description,
+          price: priceNum,
+          currency: currency || 'EUR',
+          categorySlug,
+          subCategorySlug: subCategorySlug || undefined,
+          details: sanitizedDetails,
+          attributes: parseAttributes(req.body.attributes),
+          images,
+          status: 'draft',
+          user: req.user.id,
+        };
+
+        const ad = await Ad.create(adData);
+        const populatedAd = await Ad.findById(ad._id).populate('user', 'name email');
+
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[CREATE_AD] ad created', ad._id, 'details keys:', Object.keys(sanitizedDetails));
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: 'Ad created successfully',
+          ad: populatedAd,
+        });
+      }
+    }
+
+    // Return structured 400 with fieldErrors
+    return res.status(400).json({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: 'Please fill in required details',
+      fieldErrors,
     });
   } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[CREATE_AD] error:', error.message);
+    }
     next(error);
   }
 };

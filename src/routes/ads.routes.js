@@ -13,7 +13,6 @@ import {
 import { protect } from '../middlewares/auth.middleware.js';
 import { apiLimiter } from '../middlewares/rateLimit.middleware.js';
 import { validateUpdateStatus } from '../middlewares/validate.middleware.js';
-import { validateCreateAd } from '../middlewares/validateAd.middleware.js';
 import { validateAdUpdate } from '../middlewares/validateAdUpdate.middleware.js';
 import { checkAdOwnership } from '../middlewares/adOwnership.middleware.js';
 import { uploadImages, uploadToCloudinary } from '../middlewares/upload.middleware.js';
@@ -62,12 +61,11 @@ router.get('/:id', getAdById);
 
 /**
  * @route   POST /api/ads
- * @desc    Create new ad (status: draft)
+ * @desc    Create new ad (status: draft). Validation and fieldErrors returned in createAd.
  * @access  Private
  * @middleware protect - JWT authentication required
  * @middleware uploadImages - Handle multipart/form-data
  * @middleware uploadToCloudinary - Upload to Cloudinary (required)
- * @middleware validateCreateAd - Validate ad data
  */
 router.post(
   '/',
@@ -75,7 +73,6 @@ router.post(
   apiLimiter,
   uploadImages,
   uploadToCloudinary(true), // Images required for creation
-  validateCreateAd,
   createAd
 );
 
