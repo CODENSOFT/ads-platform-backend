@@ -407,7 +407,7 @@ export const createAd = async (req, res, next) => {
 
     const fieldErrors = {};
 
-    // Parse details safely
+    // Parse details safely: JSON string, or object, or flat keys details[key] / detail_key from multipart
     let detailsObj = {};
     if (typeof detailsRaw === 'string' && detailsRaw.trim()) {
       try {
@@ -425,6 +425,22 @@ export const createAd = async (req, res, next) => {
       }
     } else if (detailsRaw && typeof detailsRaw === 'object' && !Array.isArray(detailsRaw)) {
       detailsObj = detailsRaw;
+    } else {
+      // Build from flat multipart keys: details[key] or detail_key
+      const body = req.body || {};
+      for (const key of Object.keys(body)) {
+        if (key === 'details') continue;
+        let inner = null;
+        if (key.startsWith('details[') && key.endsWith(']')) {
+          inner = key.slice(8, -1);
+        } else if (key.startsWith('detail_')) {
+          inner = key.slice(7);
+        }
+        if (inner) {
+          const v = body[key];
+          if (v !== undefined && v !== null) detailsObj[inner] = typeof v === 'string' ? v.trim() : v;
+        }
+      }
     }
 
     // Basic field validation
@@ -511,7 +527,9 @@ export const createAd = async (req, res, next) => {
       }
     }
 
-    // Return structured 400 with fieldErrors
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[CREATE_AD] 400 validation', { fieldErrors, detailsKeys: Object.keys(detailsObj) });
+    }
     return res.status(400).json({
       success: false,
       code: 'VALIDATION_ERROR',
