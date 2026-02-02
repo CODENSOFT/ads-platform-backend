@@ -1,6 +1,6 @@
 import { body, validationResult } from 'express-validator';
 import { AppError } from './error.middleware.js';
-import { isValidCategorySlug, isValidSubcategorySlug } from '../constants/categories.js';
+import Category from '../models/Category.js';
 import { validateAttributes } from '../utils/attributeValidator.js';
 
 // Middleware to handle validation errors
@@ -103,49 +103,42 @@ export const validateAdUpdate = [
     .isIn(['EUR', 'USD', 'MDL'])
     .withMessage('Currency must be one of: EUR, USD, MDL'),
 
-  // Validate categorySlug (optional for update)
+  // Validate categorySlug (optional for update) - must exist in Category collection
   body('categorySlug')
     .optional()
     .trim()
     .notEmpty()
     .withMessage('Category cannot be empty')
-    .custom((value) => {
-      if (!isValidCategorySlug(value)) {
+    .custom(async (value) => {
+      const cat = await Category.findOne({ slug: (value || '').toLowerCase() });
+      if (!cat) {
         throw new Error('Invalid category');
       }
       return true;
     }),
 
-  // Validate subCategorySlug (optional for update, but must match category if provided)
+  // Validate subCategorySlug (optional for update)
   body('subCategorySlug')
     .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Subcategory cannot be empty')
-    .custom((value, { req }) => {
-      const categorySlug = req.body.categorySlug;
-      if (categorySlug && !isValidSubcategorySlug(categorySlug, value)) {
-        throw new Error('Invalid subcategory for the selected category');
-      }
-      return true;
-    }),
+    .trim(),
 
-  // Validate attributes (optional for update)
+  // Validate attributes (optional for update) - allowed keys only; full validation in controller
   body('attributes')
     .optional()
-    .isObject()
-    .withMessage('Attributes must be an object')
-    .custom((attributes, { req }) => {
-      // Use categorySlug from body if provided, otherwise we can't validate
+    .custom((value) => {
+      if (value !== undefined && (typeof value !== 'object' || value === null || Array.isArray(value))) {
+        throw new Error('Attributes must be an object');
+      }
+      return true;
+    })
+    .custom(async (attributes, { req }) => {
       const categorySlug = req.body.categorySlug;
-      if (!categorySlug) {
-        // If categorySlug is not being updated, we'd need to get it from the existing ad
-        // For now, skip validation if categorySlug is not in the update
+      if (!categorySlug || !attributes || typeof attributes !== 'object' || Array.isArray(attributes)) {
         return true;
       }
-      const validation = validateAttributes(categorySlug, attributes);
+      const validation = await validateAttributes(categorySlug, attributes);
       if (!validation.valid) {
-        throw new Error(`Invalid attributes for category '${categorySlug}': ${validation.invalidKeys.join(', ')}`);
+        throw new Error(`Invalid attribute keys for category: ${validation.invalidKeys.join(', ')}`);
       }
       return true;
     }),

@@ -41,6 +41,10 @@ const startServer = async () => {
     const { cleanupBrokenChats } = await import('./scripts/cleanupBrokenChats.js');
     await cleanupBrokenChats();
 
+    // Ensure 6 categories exist (automobiles, real-estate, electronics, home-garden, fashion-beauty, jobs)
+    const { seedCategories } = await import('./seed/categories.seed.js');
+    await seedCategories();
+
     // Start Express server only if DB connection is successful
     // Listen on 0.0.0.0 to accept connections from Railway
     app.listen(PORT, '0.0.0.0', () => {

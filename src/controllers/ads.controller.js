@@ -1,11 +1,12 @@
 import Ad from '../models/Ad.js';
 import User from '../models/User.js';
+import Category from '../models/Category.js';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import { AppError } from '../middlewares/error.middleware.js';
 import cloudinary from '../config/cloudinary.js';
 import logger from '../config/logger.js';
-import { getCategoriesPublic, isValidCategorySlug, isValidSubcategorySlug } from '../constants/categories.js';
+import { validateAttributesAgainstCategory } from '../utils/attributeValidator.js';
 
 /**
  * Escape regex special characters to prevent regex injection
@@ -17,306 +18,152 @@ const escapeRegex = (str) => {
 };
 
 /**
- * Get all categories with subcategories
- * GET /api/categories
+ * Normalize query string: treat null, undefined, '', 'null', 'undefined' as missing.
+ * @param {*} v - Raw value (string or other)
+ * @returns {string} '' if invalid/missing, else trimmed string
  */
-export const getCategories = async (req, res, next) => {
-  try {
-    const categories = getCategoriesPublic();
+const normalizeString = (v) => {
+  if (v === null || v === undefined) return '';
+  if (typeof v !== 'string') return '';
+  const t = v.trim();
+  if (t === '' || t.toLowerCase() === 'null' || t.toLowerCase() === 'undefined') return '';
+  return t;
+};
 
-    res.status(200).json({
-      success: true,
-      categories,
-    });
-  } catch (error) {
-    next(error);
+/**
+ * Parse attributes from request body (multipart may send JSON string).
+ * @param {*} raw - req.body.attributes
+ * @returns {object} Plain object or {}
+ */
+const parseAttributes = (raw) => {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
   }
+  return {};
 };
 
 export const getAds = async (req, res, next) => {
   try {
-    const {
-      q,
-      search,
-      minPrice,
-      maxPrice,
-      currency,
-      categoryId, // Filter by category ObjectId (if category field exists as ObjectId)
-      category, // Support both 'category' and 'categorySlug' for compatibility (slug-based)
-      categorySlug,
-      subCategorySlug,
-      sort,
-      page,
-      limit,
-      // Attribute filters
-      brand,
-      condition,
-      year,
-      rooms,
-      areaMin,
-      areaMax,
-    } = req.query;
+    // Parse and normalize query params (category/categorySlug, subCategory/subCategorySlug aliases)
+    const categorySlugRaw = normalizeString(req.query.categorySlug || req.query.category || '');
+    let subCategorySlugRaw = normalizeString(req.query.subCategorySlug || req.query.subCategory || '');
+    const search = normalizeString(req.query.search || req.query.q || '');
+    const sortParam = normalizeString(req.query.sort || '-createdAt');
+    const minPriceRaw = normalizeString(req.query.minPrice || '');
+    const maxPriceRaw = normalizeString(req.query.maxPrice || '');
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20', 10) || 20));
 
-    // Build query object - only active, non-deleted ads
-    const query = {
+    // Optional: resolve categoryId -> categorySlug (prioritize slugs from query)
+    let categorySlug = categorySlugRaw ? categorySlugRaw.toLowerCase() : '';
+    const categoryId = req.query.categoryId;
+    if (!categorySlug && categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
+      const cat = await Category.findById(categoryId).select('slug').lean();
+      if (cat && cat.slug) categorySlug = cat.slug.toLowerCase();
+    }
+    const subCategorySlug = subCategorySlugRaw ? subCategorySlugRaw.toLowerCase() : '';
+
+    // Build Mongo query: active, non-deleted only
+    const q = {
       status: 'active',
       isDeleted: false,
     };
 
-    // Text search by title (case-insensitive)
-    // Support both 'search' and legacy 'q' parameter (search takes precedence)
-    const searchRaw = (typeof search === 'string' && search.trim().length > 0)
-      ? search
-      : q;
-    const searchTerm = (typeof searchRaw === 'string' ? searchRaw.trim() : '');
-    if (searchTerm.length > 0) {
-      const searchEscaped = escapeRegex(searchTerm);
-      query.title = { $regex: searchEscaped, $options: 'i' };
+    if (categorySlug) q.categorySlug = categorySlug;
+    if (subCategorySlug) q.subCategorySlug = subCategorySlug;
+
+    // Search: title OR description (case-insensitive, regex escaped)
+    if (search) {
+      const searchEscaped = escapeRegex(search);
+      const searchRegex = new RegExp(searchEscaped, 'i');
+      q.$or = [{ title: searchRegex }, { description: searchRegex }];
     }
 
-    // Filter by price range
-    // Ignore invalid values (NaN) instead of throwing 400
-    if (minPrice || maxPrice) {
-      query.price = {};
-      if (minPrice) {
-        const minPriceNum = parseFloat(minPrice);
-        if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-          query.price.$gte = minPriceNum;
-        }
-      }
-      if (maxPrice) {
-        const maxPriceNum = parseFloat(maxPrice);
-        if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-          query.price.$lte = maxPriceNum;
-        }
-      }
-      // If price object is empty, remove it
-      if (Object.keys(query.price).length === 0) {
-        delete query.price;
-      }
+    // Price range
+    const minPriceNum = minPriceRaw !== '' ? parseFloat(minPriceRaw) : NaN;
+    const maxPriceNum = maxPriceRaw !== '' ? parseFloat(maxPriceRaw) : NaN;
+    if (!isNaN(minPriceNum) && minPriceNum >= 0) {
+      q.price = q.price || {};
+      q.price.$gte = minPriceNum;
+    }
+    if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
+      q.price = q.price || {};
+      q.price.$lte = maxPriceNum;
     }
 
-    // Filter by currency (exact match if provided)
-    // Trim string and validate it's one of allowed values
-    if (currency && typeof currency === 'string' && currency.trim().length > 0) {
-      const currencyTrimmed = currency.trim();
-      const allowedCurrencies = ['EUR', 'USD', 'MDL'];
-      if (allowedCurrencies.includes(currencyTrimmed)) {
-        query.currency = currencyTrimmed;
-      }
-    }
-
-    // Filter by categoryId (ObjectId) - if category field exists as ObjectId reference
-    // NOTE: Ad model currently uses categorySlug (String), not category (ObjectId)
-    // To enable categoryId filtering, add category field to Ad model:
-    // category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }
-    if (categoryId) {
-      if (!mongoose.Types.ObjectId.isValid(categoryId)) {
-        return next(
-          new AppError('Invalid categoryId format', 400, {
-            type: 'INVALID_ID',
-            field: 'categoryId',
-          })
-        );
-      }
-      // Apply filter - will work when Ad model has 'category' ObjectId field
-      // For now, this won't match anything since Ad model only has categorySlug
-      query.category = new mongoose.Types.ObjectId(categoryId);
-    }
-
-    // Filter by category slug (support both 'category' and 'categorySlug' for compatibility)
-    // Use category if provided, otherwise fall back to categorySlug
-    // Only apply slug filter if categoryId was not provided (categoryId takes precedence)
-    const categoryFilter = !categoryId ? (category || categorySlug) : null;
-
-    // If subCategorySlug is provided without category, return error
-    if (subCategorySlug && !categoryFilter && !categoryId) {
-      return next(
-        new AppError('category required when filtering by subCategorySlug', 400, {
-          type: 'INVALID_FILTER',
-          field: 'subCategorySlug',
-        })
-      );
-    }
-
-    // Apply category slug filter using regex (case-insensitive) on categorySlug field
-    if (categoryFilter) {
-      if (typeof categoryFilter !== 'string' || categoryFilter.trim().length === 0) {
-        return next(
-          new AppError('Invalid category parameter', 400, {
-            type: 'INVALID_CATEGORY',
-            field: 'category',
-          })
-        );
-      }
-
-      const categoryTrimmed = categoryFilter.trim();
-      const categoryEscaped = escapeRegex(categoryTrimmed);
-      // Use regex for case-insensitive matching on categorySlug field
-      query.categorySlug = new RegExp(`^${categoryEscaped}$`, 'i');
-
-      // If subCategorySlug is provided, validate it belongs to category
-      if (subCategorySlug) {
-        if (typeof subCategorySlug !== 'string' || subCategorySlug.trim().length === 0) {
-          return next(
-            new AppError('Invalid subCategorySlug parameter', 400, {
-              type: 'INVALID_SUBCATEGORY',
-              field: 'subCategorySlug',
-            })
-          );
-        }
-
-        const subCategorySlugTrimmed = subCategorySlug.trim();
-        // For subcategory, also use regex matching
-        const subCategoryEscaped = escapeRegex(subCategorySlugTrimmed);
-        query.subCategorySlug = new RegExp(`^${subCategoryEscaped}$`, 'i');
-      }
-    }
-
-    // Filter by attributes
-    // Build attributes query object
-    const attributesQuery = {};
-    if (brand && typeof brand === 'string' && brand.trim().length > 0) {
-      attributesQuery['attributes.brand'] = brand.trim();
-    }
-    if (condition && typeof condition === 'string' && condition.trim().length > 0) {
-      attributesQuery['attributes.condition'] = condition.trim();
-    }
-    if (year && typeof year === 'string' && year.trim().length > 0) {
-      // Year can be a string or number, validate it's a valid year
-      const yearNum = parseInt(year.trim(), 10);
+    // Optional: currency and attribute filters (backward compatibility)
+    const currency = normalizeString(req.query.currency || '');
+    if (currency && ['EUR', 'USD', 'MDL'].includes(currency)) q.currency = currency;
+    const brand = normalizeString(req.query.brand || '');
+    if (brand) q['attributes.brand'] = brand;
+    const condition = normalizeString(req.query.condition || '');
+    if (condition) q['attributes.condition'] = condition;
+    const year = normalizeString(req.query.year || '');
+    if (year) {
+      const yearNum = parseInt(year, 10);
       if (!isNaN(yearNum) && yearNum > 1900 && yearNum <= new Date().getFullYear() + 1) {
-        attributesQuery['attributes.year'] = yearNum.toString();
+        q['attributes.year'] = String(yearNum);
       }
     }
-    if (rooms && typeof rooms === 'string' && rooms.trim().length > 0) {
-      const roomsNum = parseInt(rooms.trim(), 10);
-      if (!isNaN(roomsNum) && roomsNum > 0) {
-        attributesQuery['attributes.rooms'] = roomsNum.toString();
-      }
+    const rooms = normalizeString(req.query.rooms || '');
+    if (rooms) {
+      const roomsNum = parseInt(rooms, 10);
+      if (!isNaN(roomsNum) && roomsNum > 0) q['attributes.rooms'] = String(roomsNum);
     }
-    // Area range filter
-    // For MVP: Since attributes are stored as Map<String>, use $expr for numeric comparison
+    const areaMin = normalizeString(req.query.areaMin || '');
+    const areaMax = normalizeString(req.query.areaMax || '');
     const areaConditions = [];
     if (areaMin) {
-      const areaMinNum = parseFloat(areaMin);
-      if (!isNaN(areaMinNum) && areaMinNum >= 0) {
-        areaConditions.push({ $gte: [{ $toDouble: { $ifNull: ['$attributes.area', '0'] } }, areaMinNum] });
-      }
+      const n = parseFloat(areaMin);
+      if (!isNaN(n) && n >= 0) areaConditions.push({ $gte: [{ $toDouble: { $ifNull: ['$attributes.areaSqm', '$attributes.area', '0'] } }, n] });
     }
     if (areaMax) {
-      const areaMaxNum = parseFloat(areaMax);
-      if (!isNaN(areaMaxNum) && areaMaxNum >= 0) {
-        areaConditions.push({ $lte: [{ $toDouble: { $ifNull: ['$attributes.area', '0'] } }, areaMaxNum] });
-      }
+      const n = parseFloat(areaMax);
+      if (!isNaN(n) && n >= 0) areaConditions.push({ $lte: [{ $toDouble: { $ifNull: ['$attributes.areaSqm', '$attributes.area', '0'] } }, n] });
     }
-    if (areaConditions.length > 0) {
-      if (areaConditions.length === 1) {
-        query.$expr = areaConditions[0];
-      } else {
-        query.$expr = { $and: areaConditions };
-      }
-    }
+    if (areaConditions.length) q.$expr = areaConditions.length === 1 ? areaConditions[0] : { $and: areaConditions };
 
-    // Merge attributes query into main query
-    if (Object.keys(attributesQuery).length > 0) {
-      Object.assign(query, attributesQuery);
-    }
+    // Sort: '-createdAt' (default), 'price', '-price'
+    let sortOption = { createdAt: -1 };
+    if (sortParam === 'price') sortOption = { price: 1, createdAt: -1 };
+    else if (sortParam === '-price') sortOption = { price: -1, createdAt: -1 };
+    else if (sortParam === 'createdAt') sortOption = { createdAt: 1 };
+    // else '-createdAt' or any other -> default
 
-    // Pagination logic
-    // Validate page >= 1
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    
-    // Validate limit: default 20, clamp 1..50
-    let limitNum = parseInt(limit, 10);
-    if (isNaN(limitNum) || limitNum < 1) {
-      limitNum = 20;
-    }
-    limitNum = Math.min(50, Math.max(1, limitNum));
-    
-    const skip = (pageNum - 1) * limitNum;
+    const skip = (page - 1) * limit;
 
-    // Sorting logic
-    // Default: newest (createdAt desc)
-    // Options: newest, price_asc, price_desc
-    let sortOptions = { createdAt: -1 }; // Default: newest first
-    if (sort && typeof sort === 'string') {
-      const sortValue = sort.trim().toLowerCase();
-      switch (sortValue) {
-        case 'price_asc':
-          sortOptions = { price: 1, createdAt: -1 }; // Price ascending, then newest first
-          break;
-        case 'price_desc':
-          sortOptions = { price: -1, createdAt: -1 }; // Price descending, then newest first
-          break;
-        case 'newest':
-        default:
-          sortOptions = { createdAt: -1 }; // Newest first (default)
-          break;
-      }
-    }
-
-    // Execute query with pagination and sorting
-    const findQuery = Ad.find(query)
-      .populate('user', 'name email')
-      .sort(sortOptions)
-      .skip(skip);
-    
-    findQuery.limit(limitNum);
-    
     const [ads, total] = await Promise.all([
-      findQuery.lean(),
-      Ad.countDocuments(query),
+      Ad.find(q).populate('user', 'name email').sort(sortOption).skip(skip).limit(limit).lean(),
+      Ad.countDocuments(q),
     ]);
 
-    // Calculate pagination metadata
-    const pages = Math.ceil(total / limitNum);
-
-    // Build response with both formats for backward compatibility
-    const response = {
-      success: true,
-      // Top-level ads for backward compatibility
-      ads,
-      // New data wrapper format
-      data: {
-        ads,
-        pagination: {
-          page: pageNum,
-          limit: limitNum,
-          total,
-          pages,
-          hasNext: pageNum < pages,
-          hasPrev: pageNum > 1,
-        },
-      },
-      // Also include pagination at top level for backward compatibility
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        pages,
-        hasNext: pageNum < pages,
-        hasPrev: pageNum > 1,
-      },
+    const pages = Math.ceil(total / limit) || 1;
+    const pagination = {
+      page,
+      limit,
+      total,
+      pages,
+      hasNext: page < pages,
+      hasPrev: page > 1,
     };
 
-    // Add filters object for debugging in development only
-    if (process.env.NODE_ENV !== 'production') {
-      response.filters = {
-        search: searchTerm || null,
-        category: categoryFilter ? categoryFilter.trim() : null,
-        categorySlug: categorySlug ? categorySlug.trim() : null,
-        subCategorySlug: subCategorySlug ? subCategorySlug.trim() : null,
-        minPrice: minPrice ? parseFloat(minPrice) : null,
-        maxPrice: maxPrice ? parseFloat(maxPrice) : null,
-        currency: currency ? currency.trim() : null,
-        sort: sort ? sort.trim() : 'newest',
-        status: query.status,
-        isDeleted: query.isDeleted,
-      };
-    }
-
-    res.json(response);
+    // Prefer ONE structure: response.data.ads; keep top-level ads + pagination for compatibility
+    res.json({
+      success: true,
+      ads,
+      pagination,
+      data: {
+        ads,
+        pagination,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -480,15 +327,14 @@ export const createAd = async (req, res, next) => {
 
     // Extract ONLY allowed fields from request body
     // Strict filtering to prevent injection of protected fields
-    // Only categorySlug and subCategorySlug are accepted (not category/subcategory)
     const allowedFields = {
       title: req.body.title,
       description: req.body.description,
       price: req.body.price,
       currency: req.body.currency,
       categorySlug: req.body.categorySlug,
-      subCategorySlug: req.body.subCategorySlug, // Optional
-      attributes: req.body.attributes, // Optional
+      subCategorySlug: req.body.subCategorySlug,
+      attributes: parseAttributes(req.body.attributes),
     };
 
     // Validate required fields
@@ -496,6 +342,26 @@ export const createAd = async (req, res, next) => {
       return next(
         new AppError('Title, description, price, and categorySlug are required', 400, {
           type: 'MISSING_REQUIRED_FIELDS',
+        })
+      );
+    }
+
+    // Load category and validate attributes (required fields, select options, min/max)
+    const category = await Category.findOne({ slug: allowedFields.categorySlug.trim().toLowerCase() });
+    if (!category) {
+      return next(
+        new AppError('Category not found', 400, {
+          type: 'CATEGORY_NOT_FOUND',
+          categorySlug: allowedFields.categorySlug,
+        })
+      );
+    }
+    const attrValidation = await validateAttributesAgainstCategory(allowedFields.categorySlug.trim(), allowedFields.attributes);
+    if (!attrValidation.valid) {
+      return next(
+        new AppError('Attribute validation failed', 400, {
+          type: 'ATTRIBUTE_VALIDATION',
+          errors: attrValidation.errors,
         })
       );
     }
@@ -511,24 +377,18 @@ export const createAd = async (req, res, next) => {
     }
 
     // Create controlled ad object with ONLY allowed fields
-    // Protected fields are set explicitly, NOT from request body
     const adData = {
-      // Allowed fields from request body (strictly filtered)
       title: allowedFields.title.trim(),
       description: allowedFields.description.trim(),
       price: parseFloat(allowedFields.price),
       currency: allowedFields.currency || 'EUR',
       categorySlug: allowedFields.categorySlug.trim(),
-      ...(allowedFields.subCategorySlug && { subCategorySlug: allowedFields.subCategorySlug.trim() }),
-      ...(allowedFields.attributes && { attributes: allowedFields.attributes }),
-      
-      // Images from upload middleware (NOT from request body directly)
-      images: images, // Array of Cloudinary URLs from uploadToCloudinary middleware
-      
-      // Protected fields - set explicitly, NEVER from request body
-      status: 'draft', // Always create as draft - cannot be changed at creation
-      user: req.user.id, // User comes ONLY from req.user.id (JWT token)
-      // isDeleted defaults to false in schema
+      ...(allowedFields.subCategorySlug && allowedFields.subCategorySlug.trim() && { subCategorySlug: allowedFields.subCategorySlug.trim() }),
+      attributes: allowedFields.attributes,
+
+      images,
+      status: 'draft',
+      user: req.user.id,
     };
 
     // Validate price is a valid number
@@ -709,10 +569,9 @@ export const updateAd = async (req, res, next) => {
     }
 
     // Extract ONLY allowed fields from request body
-    // Protected fields (user, status, isDeleted, images) are NOT allowed
-    const { title, description, price, currency, categorySlug, subCategorySlug, attributes } = req.body;
+    const { title, description, price, currency, categorySlug, subCategorySlug, attributes: rawAttributes } = req.body;
+    const attributes = rawAttributes !== undefined ? parseAttributes(rawAttributes) : undefined;
 
-    // Check if at least one field is being updated (should be validated by middleware, but double-check)
     const hasUpdates =
       title !== undefined ||
       description !== undefined ||
@@ -720,7 +579,7 @@ export const updateAd = async (req, res, next) => {
       currency !== undefined ||
       categorySlug !== undefined ||
       subCategorySlug !== undefined ||
-      attributes !== undefined;
+      rawAttributes !== undefined;
 
     if (!hasUpdates) {
       return next(
@@ -730,17 +589,30 @@ export const updateAd = async (req, res, next) => {
       );
     }
 
-    // Update allowed fields only
-    // Use controlled updates to prevent injection of protected fields
-    if (title !== undefined) {
-      ad.title = title.trim();
+    // Effective category after update (for attribute validation)
+    const effectiveCategorySlug = (categorySlug !== undefined ? categorySlug.trim() : ad.categorySlug) || '';
+
+    // When attributes are being updated, validate against category schema (required, select, min/max)
+    if (attributes !== undefined) {
+      const category = await Category.findOne({ slug: effectiveCategorySlug.toLowerCase() });
+      if (category) {
+        const attrValidation = await validateAttributesAgainstCategory(effectiveCategorySlug, attributes);
+        if (!attrValidation.valid) {
+          return next(
+            new AppError('Attribute validation failed', 400, {
+              type: 'ATTRIBUTE_VALIDATION',
+              errors: attrValidation.errors,
+            })
+          );
+        }
+      }
+      ad.attributes = attributes && typeof attributes === 'object' ? attributes : {};
     }
-    if (description !== undefined) {
-      ad.description = description.trim();
-    }
+
+    if (title !== undefined) ad.title = title.trim();
+    if (description !== undefined) ad.description = description.trim();
     if (price !== undefined) {
       ad.price = parseFloat(price);
-      // Validate price is positive (should be validated by middleware, but double-check)
       if (isNaN(ad.price) || ad.price <= 0) {
         return next(
           new AppError('Price must be a positive number greater than 0', 400, {
@@ -749,38 +621,10 @@ export const updateAd = async (req, res, next) => {
         );
       }
     }
-    if (currency !== undefined) {
-      ad.currency = currency;
-    }
-    if (categorySlug !== undefined) {
-      ad.categorySlug = categorySlug.trim();
-    }
+    if (currency !== undefined) ad.currency = currency;
+    if (categorySlug !== undefined) ad.categorySlug = categorySlug.trim();
     if (subCategorySlug !== undefined) {
-      ad.subCategorySlug = subCategorySlug.trim();
-    }
-    if (attributes !== undefined) {
-      // Convert plain object to Map if needed, or just set it
-      if (attributes && typeof attributes === 'object' && !Array.isArray(attributes)) {
-        // Mongoose Map can be set directly from object
-        ad.attributes = attributes;
-      } else if (attributes === null) {
-        ad.attributes = {};
-      }
-    }
-
-    // Validate category/subcategory combination if both are being updated
-    if (categorySlug !== undefined || subCategorySlug !== undefined) {
-      const finalCategorySlug = categorySlug !== undefined ? categorySlug.trim() : ad.categorySlug;
-      const finalSubCategorySlug = subCategorySlug !== undefined ? subCategorySlug.trim() : ad.subCategorySlug;
-      
-      // Only validate if subCategorySlug is provided
-      if (finalSubCategorySlug && !isValidSubcategorySlug(finalCategorySlug, finalSubCategorySlug)) {
-        return next(
-          new AppError('Invalid subcategory for the selected category', 400, {
-            type: 'INVALID_SUBCATEGORY',
-          })
-        );
-      }
+      ad.subCategorySlug = subCategorySlug.trim() || undefined;
     }
 
     // Save changes (Mongoose will validate schema constraints)

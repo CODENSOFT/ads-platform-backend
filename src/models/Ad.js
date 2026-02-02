@@ -39,8 +39,7 @@ const adSchema = new mongoose.Schema(
       trim: true,
     },
     attributes: {
-      type: Map,
-      of: String,
+      type: Object,
       default: {},
     },
     status: {
