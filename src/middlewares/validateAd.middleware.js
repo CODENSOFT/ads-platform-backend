@@ -42,11 +42,32 @@ const checkExtraFields = (allowedFields) => {
   };
 };
 
+// Allowed for create ad: base fields + details (JSON or flat keys details[key], detail_key)
+const CREATE_AD_ALLOWED = ['title', 'description', 'price', 'currency', 'images', 'categorySlug', 'subCategorySlug', 'attributes', 'details'];
+const isAllowedCreateAdKey = (key) =>
+  CREATE_AD_ALLOWED.includes(key) || key.startsWith('details[') || key.startsWith('detail_');
+
+const checkExtraFieldsCreateAd = (req, res, next) => {
+  const bodyKeys = Object.keys(req.body || {});
+  const extraFields = bodyKeys.filter((key) => !isAllowedCreateAdKey(key));
+
+  if (extraFields.length > 0) {
+    return next(
+      new AppError('Extra fields not allowed', 400, {
+        errors: extraFields.map((field) => ({
+          field,
+          message: `Field '${field}' is not allowed`,
+        })),
+      })
+    );
+  }
+  next();
+};
+
 // Validation rules for create ad
 export const validateCreateAd = [
-  // Check for extra fields first - status is NOT allowed at creation
-  // Only categorySlug and subCategorySlug are accepted (not category/subcategory)
-  checkExtraFields(['title', 'description', 'price', 'currency', 'images', 'categorySlug', 'subCategorySlug', 'attributes', 'details']),
+  // Allow: title, description, price, currency, images, categorySlug, subCategorySlug, attributes, details (+ details[key], detail_*)
+  checkExtraFieldsCreateAd,
   
   // Validate title
   body('title')
