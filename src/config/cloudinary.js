@@ -1,54 +1,63 @@
-import { v2 as cloudinary } from 'cloudinary';
+import { v2 as cloudinaryLib } from 'cloudinary';
 import logger from './logger.js';
 
+const CLOUDINARY_ERROR_MSG =
+  'Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in your environment.';
+
 /**
- * Configure Cloudinary with environment variables
- * Validates that all required credentials are present
+ * Stub client used when env vars are missing. Throws only when upload/delete is called.
  */
-const configureCloudinary = () => {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-  const apiKey = process.env.CLOUDINARY_API_KEY;
-  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+function createStubClient() {
+  const throwNotConfigured = () => {
+    throw new Error(CLOUDINARY_ERROR_MSG);
+  };
+  return {
+    config: () => {},
+    uploader: {
+      upload_stream: function () {
+        throwNotConfigured();
+      },
+      destroy: function () {
+        throwNotConfigured();
+      },
+    },
+    api: {},
+  };
+}
 
-  // Validate required environment variables
-  if (!cloudName || !apiKey || !apiSecret) {
-    const missing = [];
-    if (!cloudName) missing.push('CLOUDINARY_CLOUD_NAME');
-    if (!apiKey) missing.push('CLOUDINARY_API_KEY');
-    if (!apiSecret) missing.push('CLOUDINARY_API_SECRET');
+/**
+ * Configure Cloudinary with environment variables.
+ * If any required var is missing, log a warning and export a stub that throws on use.
+ */
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+const apiKey = process.env.CLOUDINARY_API_KEY;
+const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
-    logger.error('Cloudinary configuration error', {
-      message: `Missing required environment variables: ${missing.join(', ')}`,
-      missing,
-    });
+const hasAllVars = cloudName && apiKey && apiSecret;
 
-    throw new Error(
-      `Cloudinary configuration error: Missing required environment variables: ${missing.join(', ')}`
-    );
-  }
+let cloudinary;
 
-  // Configure Cloudinary
-  cloudinary.config({
+if (!hasAllVars) {
+  const missing = [];
+  if (!cloudName) missing.push('CLOUDINARY_CLOUD_NAME');
+  if (!apiKey) missing.push('CLOUDINARY_API_KEY');
+  if (!apiSecret) missing.push('CLOUDINARY_API_SECRET');
+
+  logger.warn('Cloudinary not configured — uploads and deletes will fail until env is set', {
+    missing,
+  });
+
+  cloudinary = createStubClient();
+} else {
+  cloudinaryLib.config({
     cloud_name: cloudName,
     api_key: apiKey,
     api_secret: apiSecret,
-    secure: true, // Always use HTTPS
+    secure: true,
   });
 
-  logger.info('Cloudinary configured successfully', {
-    cloud_name: cloudName,
-  });
-};
-
-// Initialize Cloudinary configuration
-try {
-  configureCloudinary();
-} catch (error) {
-  logger.error('Failed to configure Cloudinary', {
-    message: error.message,
-  });
-  // Don't exit process - allow server to start but uploads will fail
+  logger.info('Cloudinary configured successfully', { cloud_name: cloudName });
+  cloudinary = cloudinaryLib;
 }
 
 export default cloudinary;
-

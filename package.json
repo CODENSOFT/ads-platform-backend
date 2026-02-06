@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "seed:categories": "node scripts/seedCategories.js",
     "seed:category-fields": "node scripts/seedCategoryFields.js",
+    "test:category-schema": "node scripts/testCategorySchema.js",
+    "migrate:slugs": "node src/scripts/migrateCategorySlugs.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

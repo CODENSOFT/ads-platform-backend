@@ -1,5 +1,5 @@
 import express from 'express';
-import { getCategories, getCategoryBySlug } from '../controllers/categories.controller.js';
+import { getCategories, getCategoryBySlug, getCategorySchema } from '../controllers/categories.controller.js';
 
 const router = express.Router();
 
@@ -9,6 +9,14 @@ const router = express.Router();
  * @access  Public
  */
 router.get('/', getCategories);
+
+/**
+ * @route   GET /api/categories/:slug/schema
+ * @desc    Get category schema/criteria for CreateAd (slug, title, submitAllowed, criteria)
+ * @access  Public
+ * IMPORTANT: Must be defined before /:slug so /auto/schema matches.
+ */
+router.get('/:slug/schema', getCategorySchema);
 
 /**
  * @route   GET /api/categories/:slug

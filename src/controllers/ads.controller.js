@@ -7,7 +7,7 @@ import { AppError } from '../middlewares/error.middleware.js';
 import cloudinary from '../config/cloudinary.js';
 import logger from '../config/logger.js';
 import { validateAttributesAgainstCategory } from '../utils/attributeValidator.js';
-import { mergeFieldsByKey, validateDetails } from '../utils/dynamicDetails.js';
+import { validateDetails, getMergedSchema } from '../utils/dynamicDetails.js';
 
 /**
  * Escape regex special characters to prevent regex injection
@@ -31,6 +31,37 @@ const normalizeString = (v) => {
   return t;
 };
 
+/** Legacy category slug -> canonical (DB/front usage). Canonical: auto, real-estate, electronics, home-garden, fashion-beauty, jobs, services, business-equipment, kids, sport, animals, agriculture, education. */
+const CATEGORY_SLUG_ALIASES = {
+  automobile: 'auto',
+  imobiliare: 'real-estate',
+  'electronice-tehnica': 'electronics',
+  'casa-gradina': 'home-garden',
+  'moda-frumusete': 'fashion-beauty',
+  'locuri-de-munca': 'jobs',
+  servicii: 'services',
+  'afaceri-echipamente': 'business-equipment',
+  'copii-bebelusi': 'kids',
+  'kids-babies': 'kids',
+  'sport-timp-liber': 'sport',
+  'sport-leisure': 'sport',
+  animale: 'animals',
+  agricultura: 'agriculture',
+  'educatie-cursuri': 'education',
+  'education-courses': 'education',
+};
+
+const normalizeCategorySlug = (slug) => {
+  if (!slug || typeof slug !== 'string') return '';
+  const s = slug.trim().toLowerCase();
+  return CATEGORY_SLUG_ALIASES[s] || s;
+};
+
+const normalizeSubCategorySlug = (subSlug) => {
+  if (!subSlug || typeof subSlug !== 'string') return '';
+  return subSlug.trim().toLowerCase();
+};
+
 /**
  * Parse attributes from request body (multipart may send JSON string).
  * @param {*} raw - req.body.attributes
@@ -51,22 +82,41 @@ const parseAttributes = (raw) => {
 };
 
 /**
- * Parse details from request body (multipart may send stringified JSON).
- * @param {*} raw - req.body.details
- * @returns {object} Plain object or {}
+ * Parse details from request body: JSON string, plain object, or flat keys details[key] / detail_*.
+ * @param {*} raw - req.body.details (string or object)
+ * @param {object} [body] - req.body (for building from flat keys when raw not usable)
+ * @returns {{ detailsObj: object, jsonError?: true }}
  */
-const parseDetails = (raw) => {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') {
+const parseDetails = (raw, body) => {
+  if (typeof raw === 'string' && raw.trim()) {
     try {
       const parsed = JSON.parse(raw);
-      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+      const detailsObj = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+      return { detailsObj };
     } catch {
-      return {};
+      return { detailsObj: {}, jsonError: true };
     }
   }
-  return {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return { detailsObj: raw };
+  }
+  const detailsObj = {};
+  if (body && typeof body === 'object') {
+    for (const key of Object.keys(body)) {
+      if (key === 'details') continue;
+      let inner = null;
+      if (key.startsWith('details[') && key.endsWith(']')) {
+        inner = key.slice(8, -1);
+      } else if (key.startsWith('detail_')) {
+        inner = key.slice(7);
+      }
+      if (inner) {
+        const v = body[key];
+        if (v !== undefined && v !== null) detailsObj[inner] = typeof v === 'string' ? v.trim() : v;
+      }
+    }
+  }
+  return { detailsObj };
 };
 
 export const getAds = async (req, res, next) => {
@@ -237,7 +287,6 @@ export const getAds = async (req, res, next) => {
 
 export const getMyAds = async (req, res, next) => {
   try {
-    // Ensure req.user exists and has id (should be set by protect middleware)
     if (!req.user || !req.user.id) {
       return next(
         new AppError('Authentication required', 401, {
@@ -246,20 +295,41 @@ export const getMyAds = async (req, res, next) => {
       );
     }
 
-    // Fetch all ads for the authenticated user
-    // Include all statuses (draft/active/sold)
-    // Exclude soft-deleted ads
-    const ads = await Ad.find({
+    const statusFilter = (req.query.status || '').trim().toLowerCase();
+    const allowedStatuses = ['draft', 'active', 'sold'];
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '20', 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const query = {
       user: req.user.id,
       isDeleted: false,
-    })
-      .populate('user', 'name email')
-      .sort({ createdAt: -1 }) // Sort by newest first
-      .lean();
+    };
+    if (statusFilter && allowedStatuses.includes(statusFilter)) {
+      query.status = statusFilter;
+    }
+
+    const [ads, total] = await Promise.all([
+      Ad.find(query)
+        .select('_id title price currency images categorySlug subCategorySlug status createdAt updatedAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Ad.countDocuments(query),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
 
     res.json({
       success: true,
       ads,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
     });
   } catch (error) {
     next(error);
@@ -292,11 +362,21 @@ export const getAdById = async (req, res, next) => {
       );
     }
 
+    // Resolve schema: merged+ordered fields for ad.details labels
+    const categoryDoc = ad.categorySlug ? await Category.findOne({ slug: ad.categorySlug }).lean() : null;
+    const { fields: schemaFields } = getMergedSchema(categoryDoc, ad.subCategorySlug);
+    const resolvedSchema = {
+      categorySlug: ad.categorySlug || null,
+      subCategorySlug: ad.subCategorySlug || null,
+      fields: schemaFields,
+    };
+
     // If ad is ACTIVE: return it publicly (no auth required)
     if (ad.status === 'active') {
       return res.json({
         success: true,
         ad,
+        schema: resolvedSchema,
       });
     }
 
@@ -347,9 +427,10 @@ export const getAdById = async (req, res, next) => {
       if (adUserId === currentUserId) {
         // User is owner: return ad (any status)
         return res.json({
-      success: true,
-      ad,
-    });
+          success: true,
+          ad,
+          schema: resolvedSchema,
+        });
       } else {
         // User is authenticated but not owner: return 404 (don't leak ad existence)
         return next(
@@ -390,83 +471,32 @@ export const createAd = async (req, res, next) => {
       });
     }
 
-    // Allowed top-level body keys only (details validated dynamically by category schema later)
-    const ALLOWED_BODY_KEYS = ['title', 'description', 'price', 'currency', 'categorySlug', 'subCategorySlug', 'details', 'attributes', 'images'];
-    const isAllowedBodyKey = (k) =>
-      ALLOWED_BODY_KEYS.includes(k) || k.startsWith('details[') || k.startsWith('detail_');
-
-    const receivedBodyKeys = Object.keys(req.body || {});
-    const receivedFileFields = Array.isArray(req.files)
-      ? [...new Set(req.files.map((f) => f.fieldname).filter(Boolean))]
-      : req.files && typeof req.files === 'object'
-        ? Object.keys(req.files)
-        : [];
-    const extraBodyKeys = receivedBodyKeys.filter((k) => !isAllowedBodyKey(k));
-
-    if (extraBodyKeys.length > 0) {
-      return res.status(400).json({
-        success: false,
-        code: 'EXTRA_FIELDS_NOT_ALLOWED',
-        message: 'Extra fields not allowed',
-        receivedBodyKeys,
-        allowedBodyKeys: [...ALLOWED_BODY_KEYS, 'details[key]', 'detail_*'],
-        extraBodyKeys,
-        receivedFileFields,
-      });
-    }
+    // Single extra-fields check is in validateCreateAd middleware; details always allowed there.
 
     // Robust extraction from multipart body
     const title = (req.body.title || '').trim();
     const description = (req.body.description || '').trim();
     const priceRaw = req.body.price;
     const currency = (req.body.currency || 'EUR').trim();
-    const categorySlug = (req.body.categorySlug || '').trim().toLowerCase();
-    const subCategorySlug = (req.body.subCategorySlug || '').trim().toLowerCase();
-    const detailsRaw = req.body.details;
+    const categorySlug = normalizeCategorySlug(req.body.categorySlug);
+    const subCategorySlug = normalizeSubCategorySlug(req.body.subCategorySlug);
+    const { detailsObj, jsonError } = parseDetails(req.body.details, req.body);
+    if (jsonError) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_DETAILS_JSON',
+        message: 'Invalid details JSON',
+        fieldErrors: { details: 'Details must be valid JSON' },
+      });
+    }
 
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[CREATE_AD] body keys:', Object.keys(req.body || {}));
+      console.log('[CREATE_AD] receivedBodyKeys:', Object.keys(req.body || {}));
       console.log('[CREATE_AD] categorySlug:', categorySlug, 'subCategorySlug:', subCategorySlug);
-      console.log('[CREATE_AD] detailsRaw type:', typeof detailsRaw);
+      console.log('[CREATE_AD] parsed detail keys:', Object.keys(detailsObj));
     }
 
     const fieldErrors = {};
-
-    // Parse details safely: JSON string, or object, or flat keys details[key] / detail_key from multipart
-    let detailsObj = {};
-    if (typeof detailsRaw === 'string' && detailsRaw.trim()) {
-      try {
-        detailsObj = JSON.parse(detailsRaw);
-        if (typeof detailsObj !== 'object' || detailsObj === null || Array.isArray(detailsObj)) {
-          detailsObj = {};
-        }
-      } catch (e) {
-        return res.status(400).json({
-          success: false,
-          code: 'INVALID_DETAILS_JSON',
-          message: 'Invalid details JSON',
-          fieldErrors: { details: 'Details must be valid JSON' },
-        });
-      }
-    } else if (detailsRaw && typeof detailsRaw === 'object' && !Array.isArray(detailsRaw)) {
-      detailsObj = detailsRaw;
-    } else {
-      // Build from flat multipart keys: details[key] or detail_key
-      const body = req.body || {};
-      for (const key of Object.keys(body)) {
-        if (key === 'details') continue;
-        let inner = null;
-        if (key.startsWith('details[') && key.endsWith(']')) {
-          inner = key.slice(8, -1);
-        } else if (key.startsWith('detail_')) {
-          inner = key.slice(7);
-        }
-        if (inner) {
-          const v = body[key];
-          if (v !== undefined && v !== null) detailsObj[inner] = typeof v === 'string' ? v.trim() : v;
-        }
-      }
-    }
 
     // Basic field validation
     if (!title) fieldErrors.title = 'Title is required';
@@ -508,18 +538,16 @@ export const createAd = async (req, res, next) => {
 
     // Merge schema fields and validate details (only if category loaded)
     if (category && Object.keys(fieldErrors).length === 0) {
-      const baseFields = Array.isArray(category.fields) ? category.fields : [];
-      const subFields = Array.isArray(sub?.fields) ? sub.fields : [];
-      // Union fallback: when category has no base fields, use selected subcategory fields or union of all subcategory fields
-      let fields;
-      if (baseFields.length > 0) {
-        fields = mergeFieldsByKey(baseFields, subFields);
-      } else if (subFields.length > 0) {
-        fields = mergeFieldsByKey([], subFields);
-      } else {
-        const subs = Array.isArray(category.subcategories) ? category.subcategories : [];
-        const allSubFields = subs.reduce((acc, s) => acc.concat(Array.isArray(s.fields) ? s.fields : []), []);
-        fields = mergeFieldsByKey([], allSubFields);
+      const { fields } = getMergedSchema(category, subCategorySlug);
+      const mergedFieldKeys = fields.map((f) => f.key);
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[CREATE_AD] schema', {
+          categorySlug,
+          subCategorySlug: subCategorySlug || null,
+          mergedFieldsKeys: mergedFieldKeys,
+          receivedDetailsKeys: Object.keys(detailsObj || {}),
+        });
       }
 
       let sanitizedDetails = {};
@@ -532,9 +560,18 @@ export const createAd = async (req, res, next) => {
       } else {
         const result = validateDetails(fields, detailsObj, { categorySlug });
         sanitizedDetails = result.sanitized || {};
+        const allowedDetailKeys = fields.map((f) => f.key);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[CREATE_AD] mergedFields keys:', allowedDetailKeys);
+        }
         if (result.invalidKeys && result.invalidKeys.length > 0) {
           if (process.env.NODE_ENV !== 'production') {
-            console.log('[CREATE_AD] INVALID_DETAILS_KEYS', { categorySlug, invalidKeys: result.invalidKeys, detailsKeys: Object.keys(detailsObj), mergedFieldsCount: fields.length });
+            console.log('[CREATE_AD] INVALID_DETAILS_KEYS', {
+              receivedBodyKeys: Object.keys(req.body || {}),
+              parsedDetailKeys: Object.keys(detailsObj),
+              invalidKeys: result.invalidKeys,
+              allowedDetailKeys,
+            });
           }
           return res.status(400).json({
             success: false,
@@ -542,12 +579,19 @@ export const createAd = async (req, res, next) => {
             message: 'Invalid details keys for this category',
             fieldErrors: { details: `Invalid fields: ${result.invalidKeys.join(', ')}` },
             invalidKeys: result.invalidKeys,
-            allowedDetailKeys: fields.map((f) => f.key),
+            allowedDetailKeys,
+            mergedFieldsCount: fields.length,
+            receivedBodyKeys: Object.keys(req.body || {}),
           });
         }
         Object.assign(fieldErrors, result.fieldErrors || {});
         if (process.env.NODE_ENV !== 'production') {
-          console.log('[CREATE_AD] schema validation', { categorySlug, mergedFieldsCount: fields.length, detailsKeys: Object.keys(sanitizedDetails) });
+          console.log('[CREATE_AD] schema validation ok', {
+            categorySlug,
+            subCategorySlug,
+            mergedFieldsCount: fields.length,
+            detailsKeys: Object.keys(sanitizedDetails),
+          });
         }
       }
 
@@ -597,6 +641,7 @@ export const createAd = async (req, res, next) => {
       code: 'VALIDATION_ERROR',
       message: 'Please fill in required details',
       fieldErrors,
+      receivedBodyKeys: Object.keys(req.body || {}),
     });
   } catch (error) {
     if (process.env.NODE_ENV !== 'production') {
@@ -762,7 +807,21 @@ export const updateAd = async (req, res, next) => {
     // Extract ONLY allowed fields from request body
     const { title, description, price, currency, categorySlug, subCategorySlug, attributes: rawAttributes, details: rawDetails } = req.body;
     const attributes = rawAttributes !== undefined ? parseAttributes(rawAttributes) : undefined;
-    const details = rawDetails !== undefined ? parseDetails(rawDetails) : undefined;
+    let details;
+    if (rawDetails !== undefined) {
+      const parsed = parseDetails(rawDetails, req.body);
+      if (parsed.jsonError) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_DETAILS_JSON',
+          message: 'Invalid details JSON',
+          fieldErrors: { details: 'Details must be valid JSON' },
+        });
+      }
+      details = parsed.detailsObj;
+    } else {
+      details = undefined;
+    }
 
     const hasUpdates =
       title !== undefined ||
@@ -817,22 +876,30 @@ export const updateAd = async (req, res, next) => {
             })
           );
         }
-        const baseFields = Array.isArray(categoryForDetails.fields) ? categoryForDetails.fields : [];
-        const subFields = subMatch && Array.isArray(subMatch.fields) ? subMatch.fields : [];
-        const mergedFields = mergeFieldsByKey(baseFields, subFields);
-        try {
-          const result = sanitizeAndValidateDetails(mergedFields, details);
-          ad.details = result.sanitizedDetails;
-        } catch (err) {
-          if (err instanceof DetailsValidationError) {
+        const { fields: mergedFields } = getMergedSchema(categoryForDetails, effectiveSubSlug);
+        if (mergedFields.length === 0) {
+          ad.details = details && typeof details === 'object' && !Array.isArray(details) ? { ...details } : {};
+        } else {
+          const result = validateDetails(mergedFields, details, { categorySlug: effectiveCategorySlug });
+          if (result.invalidKeys && result.invalidKeys.length > 0) {
             return res.status(400).json({
               success: false,
-              message: err.message,
-              fieldKey: err.fieldKey,
-              ...(err.allowedOptions && { allowedOptions: err.allowedOptions }),
+              code: 'INVALID_DETAILS_KEYS',
+              message: 'Invalid details keys for this category',
+              invalidKeys: result.invalidKeys,
+              allowedDetailKeys: mergedFields.map((f) => f.key),
+              mergedFieldsCount: mergedFields.length,
             });
           }
-          throw err;
+          if (Object.keys(result.fieldErrors || {}).length > 0) {
+            return res.status(400).json({
+              success: false,
+              code: 'VALIDATION_ERROR',
+              message: 'Details validation failed',
+              fieldErrors: result.fieldErrors,
+            });
+          }
+          ad.details = result.sanitized || {};
         }
       } else {
         ad.details = details && typeof details === 'object' ? details : {};

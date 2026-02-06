@@ -10,10 +10,13 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 import authRoutes from './routes/auth.routes.js';
+import usersRoutes from './routes/users.routes.js';
 import adsRoutes from './routes/ads.routes.js';
 import favoritesRoutes from './routes/favorites.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import categoriesRoutes from './routes/categories.routes.js';
+import { getCategoryBySlug } from './controllers/categories.controller.js';
+import metaRoutes from './routes/meta.routes.js';
 import shareRoutes from './routes/share.routes.js';
 import integrationsRoutes from './routes/integrations.routes.js';
 import { errorHandler, notFound } from './middlewares/error.middleware.js';
@@ -105,14 +108,30 @@ app.get('/', (req, res) => {
   res.json({ message: 'API is running' });
 });
 
+// Diagnostic: GET /api/users/ping returns 200 if users routes are loaded (no auth)
+app.get('/api/users/ping', (req, res) => res.status(200).json({ success: true, message: 'users routes ok' }));
+
 // Authentication routes (rate limiting applied per route in auth.routes.js)
 // POST /api/auth/register - Register new user (no rate limit)
 // POST /api/auth/login - Login user (rate limited)
 app.use('/api/auth', authRoutes);
 
+// Users routes (GET /api/users/:id for seller profile)
+app.use('/api/users', usersRoutes);
+console.log('Users routes mounted at /api/users');
+
 // Categories routes (public, no rate limiting needed)
-// GET /api/categories - Get all categories with subcategories
+// Mount :slug BEFORE router so GET /api/categories/auto always matches (avoids 404 "Route not found")
+app.get('/api/categories/:slug', getCategoryBySlug);
 app.use('/api/categories', categoriesRoutes);
+console.log('[ROUTES] Categories mounted: GET /api/categories (list), GET /api/categories/:slug, GET /api/categories/:slug/schema');
+
+// Meta routes (public, no rate limiting needed)
+// GET /api/meta/health - Health check
+// GET /api/meta/cars/makes - Car makes
+// GET /api/meta/cars/models?make=Audi - Car models by make
+app.use('/api/meta', metaRoutes);
+console.log('Meta routes mounted at /api/meta');
 
 // Ads routes
 // GET /api/ads - List ads (with filters, pagination) - NO rate limiting
@@ -140,6 +159,27 @@ app.use('/api/favorites', favoritesRoutes);
 // Note: Rate limiting is applied only to POST routes in chat.routes.js
 // IMPORTANT: Mount chat routes BEFORE 404 handler
 app.use('/api/chats', chatRoutes);
+
+// Log all mounted API routes at startup (for verification)
+const mountedApiRoutes = [
+  'GET  /api/users/me',
+  'GET  /api/users/ping',
+  'GET  /api/users/:id',
+  'GET  /api/categories',
+  'GET  /api/categories/:slug',
+  'GET  /api/categories/:slug/schema',
+  'GET  /api/meta/health',
+  'GET  /api/meta/cars/makes',
+  'GET  /api/meta/cars/models',
+  'GET  /api/ads',
+  'GET  /api/ads/my',
+  'GET  /api/ads/:id',
+  'GET  /api/chats/unread-count',
+  'GET  /api/chats',
+  'GET  /api/chats/:id/messages',
+  'DELETE /api/chats/:id',
+];
+console.log('[ROUTES] Mounted API routes:', mountedApiRoutes.join(', '));
 
 // Share routes (public, no rate limiting needed)
 // GET /share/ads/:id - Share page with OpenGraph meta tags
@@ -172,7 +212,9 @@ app.get('/api/__routes', (req, res) => {
     routes: [
       'GET /',
       'USE /api/auth',
+      'USE /api/users',
       'USE /api/categories',
+      'USE /api/meta',
       'USE /api/ads',
       'USE /api/favorites',
       'USE /api/chats',

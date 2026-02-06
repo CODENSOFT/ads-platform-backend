@@ -16,6 +16,31 @@ export function mergeFieldsByKey(baseFields, subFields) {
 }
 
 /**
+ * Get merged and sorted schema for a category and optional subcategory.
+ * @param {object|null} categoryDoc - Category document (lean) with fields, subcategories
+ * @param {string} [subCategorySlug] - Optional subcategory slug
+ * @returns {{ fields: array }} { fields: merged fields sorted by order }
+ */
+export function getMergedSchema(categoryDoc, subCategorySlug) {
+  if (!categoryDoc) return { fields: [] };
+  const baseFields = Array.isArray(categoryDoc.fields) ? categoryDoc.fields : [];
+  let subFields = [];
+  if (subCategorySlug && Array.isArray(categoryDoc.subcategories)) {
+    const sub = categoryDoc.subcategories.find(
+      (s) => (s.slug || '').toString().toLowerCase() === String(subCategorySlug).toLowerCase()
+    );
+    if (sub && Array.isArray(sub.fields)) subFields = sub.fields;
+  }
+  const merged = mergeFieldsByKey(baseFields, subFields);
+  const fields = merged.sort((a, b) => {
+    const orderA = a.order != null ? Number(a.order) : 999;
+    const orderB = b.order != null ? Number(b.order) : 999;
+    return orderA - orderB;
+  });
+  return { fields };
+}
+
+/**
  * Validation error for details (status 400, fieldKey, optional allowedOptions for select).
  */
 export class DetailsValidationError extends Error {

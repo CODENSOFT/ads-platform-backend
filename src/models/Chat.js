@@ -41,6 +41,30 @@ const chatSchema = new mongoose.Schema(
       ref: 'Message',
       default: null,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    // Per-user delete: users who have "deleted" this chat for themselves (chat hidden + no send)
+    deletedFor: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+      default: [],
+      index: true,
+    },
+    deletedAtBy: {
+      type: [
+        {
+          user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+          at: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
   },
   {
     timestamps: true,
@@ -110,9 +134,11 @@ chatSchema.pre('save', function (next) {
   next();
 });
 
-// Indexes for efficient queries (NOT unique - allows unlimited chats)
+// Indexes for efficient queries
 chatSchema.index({ participants: 1 });
 chatSchema.index({ user1: 1, user2: 1 });
+chatSchema.index({ user1: 1, user2: 1, isDeleted: 1 });
+chatSchema.index({ participants: 1, deletedFor: 1 });
 
 const Chat = mongoose.model('Chat', chatSchema);
 

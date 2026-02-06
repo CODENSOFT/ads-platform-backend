@@ -1,10 +1,67 @@
 import Category from '../models/Category.js';
 import logger from '../config/logger.js';
 
+/** Normalize slug: trim + lowercase (use everywhere for consistency). */
+function normalizeSlug(slug) {
+  return String(slug ?? '').trim().toLowerCase();
+}
+
+/**
+ * Runtime guard: ensure no duplicate slugs in seed data (after normalization).
+ * Throws with clear message listing duplicated slugs.
+ */
+function assertNoDuplicateSlugs(categories) {
+  const countBySlug = {};
+  for (const cat of categories) {
+    const s = normalizeSlug(cat.slug);
+    countBySlug[s] = (countBySlug[s] || 0) + 1;
+  }
+  const duplicated = Object.entries(countBySlug).filter(([, n]) => n > 1).map(([s]) => s);
+  if (duplicated.length) {
+    throw new Error(`Duplicate category slugs in seed: ${duplicated.join(', ')}. Fix CATEGORIES so each slug is unique.`);
+  }
+}
+
+/**
+ * Deduplicate existing DB categories by slug: keep one doc per slug (keeper = most fields + subcategory fields, then newest updatedAt), delete the rest.
+ * Returns { deleted: number, slugsCleaned: string[] }.
+ */
+export async function dedupeCategoriesBySlug() {
+  const slugsWithCount = await Category.aggregate([{ $group: { _id: '$slug', count: { $sum: 1 }, ids: { $push: '$_id' } } }, { $match: { count: { $gt: 1 } } }]);
+  if (slugsWithCount.length === 0) return { deleted: 0, slugsCleaned: [] };
+  const slugsCleaned = [];
+  let deleted = 0;
+  for (const { _id: slug, ids } of slugsWithCount) {
+    const docs = await Category.find({ _id: { $in: ids } }).lean();
+    const score = (d) => {
+      const fieldsLen = Array.isArray(d.fields) ? d.fields.length : 0;
+      const subFieldsLen = (Array.isArray(d.subcategories) ? d.subcategories : []).reduce((acc, s) => acc + (Array.isArray(s.fields) ? s.fields.length : 0), 0);
+      return fieldsLen + subFieldsLen;
+    };
+    docs.sort((a, b) => {
+      const sa = score(a);
+      const sb = score(b);
+      if (sb !== sa) return sb - sa;
+      const ta = (a.updatedAt && new Date(a.updatedAt).getTime()) || 0;
+      const tb = (b.updatedAt && new Date(b.updatedAt).getTime()) || 0;
+      return tb - ta;
+    });
+    const keeperId = docs[0]._id;
+    const toDelete = docs.slice(1).map((d) => d._id);
+    if (toDelete.length) {
+      const result = await Category.deleteMany({ _id: { $in: toDelete } });
+      deleted += result.deletedCount;
+      slugsCleaned.push(slug);
+      logger.info('Categories dedupe: kept one, deleted duplicates', { slug, kept: keeperId.toString(), deleted: toDelete.length });
+    }
+  }
+  return { deleted, slugsCleaned };
+}
+
 const CATEGORIES = [
   {
     name: 'Automobile',
-    slug: 'automobile',
+    slug: 'auto',
     fields: [
       { key: 'make', label: 'Marca', type: 'select', required: true, options: ['BMW', 'Audi', 'Mercedes-Benz', 'Volkswagen', 'Toyota', 'Ford', 'Honda', 'Hyundai', 'Kia', 'Dacia', 'Skoda', 'Renault', 'Peugeot', 'Opel', 'Nissan', 'Mazda', 'Altele'] },
       { key: 'model', label: 'Model', type: 'text', required: true, placeholder: 'ex. Seria 3' },
@@ -22,11 +79,11 @@ const CATEGORIES = [
       { key: 'registered', label: 'Inmatriculare', type: 'select', required: false, options: ['Da', 'Nu'] },
       { key: 'sellerType', label: 'Autor Anunt', type: 'select', required: false, options: ['PF', 'PJ'] },
     ],
-    subcategories: [],
+    subcategories: [{ name: 'Cars', slug: 'cars', fields: [] }],
   },
   {
     name: 'Imobiliare',
-    slug: 'imobiliare',
+    slug: 'real-estate',
     fields: [
       { key: 'propertyType', label: 'Tip Imobil', type: 'select', required: true, options: ['Apartament', 'Casă', 'Vilă', 'Teren', 'Spațiu comercial', 'Birou', 'Garaj'] },
       { key: 'areaM2', label: 'Suprafata m2', type: 'number', required: true, min: 0, unit: 'm²' },
@@ -37,11 +94,18 @@ const CATEGORIES = [
       { key: 'heating', label: 'Incalzire', type: 'select', required: false, options: ['Centrală', 'Individuală', 'Gaz', 'Electric', 'Pompă căldură', 'Altele'] },
       { key: 'sellerType', label: 'Autor Anunt', type: 'select', required: false, options: ['PF', 'PJ'] },
     ],
-    subcategories: [],
+    subcategories: [
+      { name: 'Apartamente vânzare', slug: 'apartments-sale', fields: [] },
+      { name: 'Apartamente închiriat', slug: 'apartments-rent', fields: [] },
+      { name: 'Spații comerciale', slug: 'commercial-spaces', fields: [] },
+      { name: 'Case & vile', slug: 'houses-villas', fields: [] },
+      { name: 'Terenuri', slug: 'lands', fields: [] },
+      { name: 'Birouri', slug: 'offices', fields: [] },
+    ],
   },
   {
     name: 'Electronice & Tehnică',
-    slug: 'electronice-tehnica',
+    slug: 'electronics',
     fields: [
       { key: 'brand', label: 'Brand', type: 'text', required: false, placeholder: 'ex. Apple' },
       { key: 'model', label: 'Model', type: 'text', required: false, placeholder: 'ex. iPhone 14' },
@@ -55,7 +119,7 @@ const CATEGORIES = [
   },
   {
     name: 'Casă & Grădină',
-    slug: 'casa-gradina',
+    slug: 'home-garden',
     fields: [
       { key: 'productType', label: 'Tip Produs', type: 'select', required: false, options: ['Mobilă', 'Decorațiuni', 'Textile', 'Unelte', 'Materiale construcții', 'Grădinărit', 'Iluminat', 'Încălzire', 'Altele'] },
       { key: 'material', label: 'Material', type: 'text', required: false, placeholder: 'ex. Lemn, metal' },
@@ -68,7 +132,7 @@ const CATEGORIES = [
   },
   {
     name: 'Modă & Frumusețe',
-    slug: 'moda-frumusete',
+    slug: 'fashion-beauty',
     fields: [
       { key: 'itemType', label: 'Tip Articol', type: 'select', required: false, options: ['Îmbrăcăminte femei', 'Îmbrăcăminte bărbați', 'Îmbrăcăminte copii', 'Încălțăminte', 'Genți & accesorii', 'Ceasuri', 'Bijuterii', 'Cosmetice', 'Altele'] },
       { key: 'size', label: 'Marime', type: 'text', required: false, placeholder: 'ex. M, 42, 36' },
@@ -81,7 +145,7 @@ const CATEGORIES = [
   },
   {
     name: 'Locuri de muncă',
-    slug: 'locuri-de-munca',
+    slug: 'jobs',
     fields: [
       { key: 'jobType', label: 'Tip Job', type: 'select', required: true, options: ['Full-time', 'Part-time', 'Contract', 'Freelance', 'Practică', 'Voluntariat'] },
       { key: 'schedule', label: 'Program', type: 'select', required: false, options: ['Zi', 'Noapte', 'Ture', 'Flexibil'] },
@@ -96,7 +160,7 @@ const CATEGORIES = [
   // A) Servicii
   {
     name: 'Servicii',
-    slug: 'servicii',
+    slug: 'services',
     fields: [
       { key: 'serviceType', label: 'Tip', type: 'select', required: true, options: ['Ofer', 'Caut'], order: 1 },
       { key: 'serviceDomain', label: 'Domeniu', type: 'select', required: true, options: ['IT', 'Constructii', 'Curatenie', 'Auto', 'Beauty', 'Consultanta', 'Transport', 'Evenimente', 'Altele'], order: 2 },
@@ -113,7 +177,7 @@ const CATEGORIES = [
   // B) Afaceri & Echipamente
   {
     name: 'Afaceri & Echipamente',
-    slug: 'afaceri-echipamente',
+    slug: 'business-equipment',
     fields: [
       { key: 'offerType', label: 'Tip oferta', type: 'select', required: true, options: ['Vand', 'Cumpar', 'Inchiriez'], order: 1 },
       { key: 'equipmentCategory', label: 'Categorie echipament', type: 'select', required: true, options: ['HoReCa', 'Industrial', 'Birou', 'Medical', 'Comercial', 'IT/Servere', 'Altele'], order: 2 },
@@ -130,10 +194,10 @@ const CATEGORIES = [
     ],
     subcategories: [],
   },
-  // C) Copii & Bebelusi
+  // C) Copii & Bebelusi (canonical slug: kids)
   {
     name: 'Copii & Bebelusi',
-    slug: 'copii-bebelusi',
+    slug: 'kids',
     fields: [
       { key: 'productType', label: 'Tip produs', type: 'select', required: true, options: ['Haine', 'Incaltaminte', 'Carucior', 'Patut', 'Jucarii', 'Alimentatie', 'Igiena', 'Altele'], order: 1 },
       { key: 'ageGroup', label: 'Varsta', type: 'select', required: true, options: ['0-6 luni', '6-12 luni', '1-2 ani', '3-5 ani', '6-9 ani', '10+'], order: 2 },
@@ -145,12 +209,16 @@ const CATEGORIES = [
       { key: 'sealed', label: 'Sigilat', type: 'boolean', required: false },
       { key: 'delivery', label: 'Livrare', type: 'boolean', required: false },
     ],
-    subcategories: [],
+    subcategories: [
+      { name: 'Haine & Încălțăminte', slug: 'clothes-shoes', fields: [] },
+      { name: 'Jucării', slug: 'toys', fields: [] },
+      { name: 'Carucioare & Patuturi', slug: 'strollers-cots', fields: [] },
+    ],
   },
-  // D) Sport & Timp Liber
+  // D) Sport & Timp Liber (canonical slug: sport)
   {
     name: 'Sport & Timp Liber',
-    slug: 'sport-timp-liber',
+    slug: 'sport',
     fields: [
       { key: 'sportType', label: 'Tip sport', type: 'select', required: true, options: ['Echipament', 'Biciclete', 'Fitness', 'Camping', 'Pescuit', 'Vanatoare', 'Jocuri', 'Altele'], order: 1 },
       { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Uzata'], order: 2 },
@@ -162,12 +230,16 @@ const CATEGORIES = [
       { key: 'level', label: 'Nivel', type: 'select', required: false, options: ['Incepator', 'Intermediar', 'Avansat', 'Pro'] },
       { key: 'delivery', label: 'Livrare', type: 'boolean', required: false },
     ],
-    subcategories: [],
+    subcategories: [
+      { name: 'Biciclete', slug: 'bicycles', fields: [] },
+      { name: 'Fitness', slug: 'fitness', fields: [] },
+      { name: 'Camping & Pescuit', slug: 'camping-fishing', fields: [] },
+    ],
   },
   // E) Animale
   {
     name: 'Animale',
-    slug: 'animale',
+    slug: 'animals',
     fields: [
       { key: 'listingType', label: 'Tip anunt', type: 'select', required: true, options: ['Vand', 'Donez', 'Monta', 'Adoptie', 'Pierdut/Gasit'], order: 1 },
       { key: 'species', label: 'Specie', type: 'select', required: true, options: ['Caine', 'Pisica', 'Pasari', 'Rozatoare', 'Pesti', 'Reptile', 'Animale de ferma', 'Altele'], order: 2 },
@@ -188,7 +260,7 @@ const CATEGORIES = [
   // F) Agricultura
   {
     name: 'Agricultura',
-    slug: 'agricultura',
+    slug: 'agriculture',
     fields: [
       { key: 'agriType', label: 'Tip', type: 'select', required: true, options: ['Utilaje', 'Piese', 'Seminte', 'Ingrasaminte', 'Produse', 'Servicii agricole', 'Altele'], order: 1 },
       { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Ca nou', 'Buna', 'Necesita reparatii'], order: 2 },
@@ -203,10 +275,10 @@ const CATEGORIES = [
     ],
     subcategories: [],
   },
-  // G) Educatie & Cursuri
+  // G) Educatie & Cursuri (canonical slug: education)
   {
     name: 'Educatie & Cursuri',
-    slug: 'educatie-cursuri',
+    slug: 'education',
     fields: [
       { key: 'educationType', label: 'Tip educatie', type: 'select', required: true, options: ['Curs', 'Meditatii', 'Training', 'Workshop'], order: 1 },
       { key: 'domain', label: 'Domeniu', type: 'select', required: true, options: ['Limbi', 'IT', 'Matematica', 'Muzica', 'Business', 'Auto', 'Altele'], order: 2 },
@@ -219,31 +291,96 @@ const CATEGORIES = [
       { key: 'pricingType', label: 'Tip pret', type: 'select', required: false, options: ['Pe sedinta', 'Pe curs', 'Negociabil'] },
       { key: 'studyMode', label: 'Mod studiu', type: 'select', required: false, options: ['Individual', 'Grup', 'Ambele'] },
     ],
-    subcategories: [],
+    subcategories: [
+      { name: 'Limbi străine', slug: 'languages', fields: [] },
+      { name: 'IT & Programare', slug: 'it-programming', fields: [] },
+      { name: 'Meditații', slug: 'tutoring', fields: [] },
+    ],
   },
 ];
 
+// Legacy slugs that may exist in DB -> canonical slug (frontend/ads use canonical).
+const LEGACY_SLUG_TO_CANONICAL = {
+  automobile: 'auto',
+  imobiliare: 'real-estate',
+  'kids-babies': 'kids',
+  'sport-leisure': 'sport',
+  'sport-timp-liber': 'sport',
+  'education-courses': 'education',
+  'educatie-cursuri': 'education',
+};
+
 /**
- * Upserts the 6 main categories with fields and subcategories.
+ * Migrate legacy slugs: if both legacy and canonical docs exist, delete legacy; if only legacy exists, update to canonical.
+ * Ensures at most one doc per canonical slug before bulkWrite.
+ */
+async function migrateLegacySlugs() {
+  for (const [legacySlug, canonicalSlug] of Object.entries(LEGACY_SLUG_TO_CANONICAL)) {
+    const cat = CATEGORIES.find((c) => normalizeSlug(c.slug) === canonicalSlug);
+    if (!cat) continue;
+    const existingLegacy = await Category.findOne({ slug: legacySlug }).lean();
+    if (!existingLegacy) continue;
+    const existingCanonical = await Category.findOne({ slug: canonicalSlug }).lean();
+    if (existingCanonical) {
+      await Category.deleteOne({ slug: legacySlug });
+      logger.info('Categories seed: removed legacy slug (canonical already exists)', { removed: legacySlug, canonical: canonicalSlug });
+    } else {
+      const subcategories = Array.isArray(cat.subcategories) && cat.subcategories.length > 0 ? cat.subcategories : (existingLegacy.subcategories || []);
+      await Category.updateOne(
+        { slug: legacySlug },
+        { $set: { slug: canonicalSlug, name: cat.name, fields: cat.fields || [], subcategories, updatedAt: new Date() } },
+        { runValidators: true }
+      );
+      logger.info('Categories seed: migrated legacy slug to canonical', { from: legacySlug, to: canonicalSlug });
+    }
+  }
+}
+
+/**
+ * Seed categories: idempotent, safe to run multiple times.
+ * 1) Guard: no duplicate slugs in CATEGORIES (normalized).
+ * 2) Dedupe existing DB by slug (keep one per slug).
+ * 3) Migrate legacy slugs (automobile -> auto, imobiliare -> real-estate).
+ * 4) bulkWrite updateOne with upsert (slug in $set, ordered: false).
  */
 export const seedCategories = async () => {
   try {
-    let created = 0;
-    let updated = 0;
-    for (const cat of CATEGORIES) {
-      const result = await Category.findOneAndUpdate(
-        { slug: cat.slug },
-        { $set: { name: cat.name, fields: cat.fields, subcategories: cat.subcategories || [] } },
-        { new: true, upsert: true, runValidators: true }
-      );
-      if (result.createdAt?.getTime() === result.updatedAt?.getTime()) {
-        created += 1;
-      } else {
-        updated += 1;
-      }
+    assertNoDuplicateSlugs(CATEGORIES);
+
+    const { deleted: dedupeDeleted, slugsCleaned } = await dedupeCategoriesBySlug();
+    if (slugsCleaned.length) {
+      logger.info('Categories seed: duplicates cleaned', { deleted: dedupeDeleted, slugs: slugsCleaned });
     }
-    logger.info('Categories seed completed', { created, updated, total: CATEGORIES.length });
-    return { created, updated, total: CATEGORIES.length };
+
+    await migrateLegacySlugs();
+
+    const now = new Date();
+    const ops = CATEGORIES.map((cat) => {
+      const normSlug = normalizeSlug(cat.slug);
+      const fields = Array.isArray(cat.fields) ? cat.fields : [];
+      const subcategories = Array.isArray(cat.subcategories) ? cat.subcategories : [];
+      return {
+        updateOne: {
+          filter: { slug: normSlug },
+          update: {
+            $set: { name: cat.name, slug: normSlug, fields, subcategories, updatedAt: now },
+            $setOnInsert: { createdAt: now },
+          },
+          upsert: true,
+        },
+      };
+    });
+
+    const bulk = await Category.bulkWrite(ops, { ordered: false });
+    const created = bulk.upsertedCount ?? bulk.nUpserted ?? 0;
+    const updated = bulk.modifiedCount ?? bulk.nModified ?? 0;
+    logger.info('Categories seed completed', {
+      created,
+      updated,
+      total: CATEGORIES.length,
+      duplicatesCleaned: slugsCleaned.length ? { deleted: dedupeDeleted, slugs: slugsCleaned } : undefined,
+    });
+    return { created, updated, total: CATEGORIES.length, duplicatesCleaned: slugsCleaned };
   } catch (error) {
     logger.error('Categories seed failed', { message: error.message });
     throw error;

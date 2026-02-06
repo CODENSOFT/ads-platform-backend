@@ -1,6 +1,6 @@
 /**
  * Seed script: upsert 4 categories with dynamic fields (999.md style).
- * Slugs: business-equipment, kids-babies, sport-leisure, education-courses.
+ * Slugs: business-equipment, kids, sport, education (canonical).
  * Run from project root: node scripts/seedCategoryFields.js
  * Uses MONGO_URI from .env. Safe to run multiple times (upsert by slug).
  */
@@ -32,10 +32,10 @@ const CATEGORIES = [
     ],
     subcategories: [],
   },
-  // 2) Copii & Bebelusi (kids-babies)
+  // 2) Copii & Bebelusi (canonical: kids)
   {
     name: 'Copii & Bebelusi',
-    slug: 'kids-babies',
+    slug: 'kids',
     fields: [
       { key: 'ageRange', label: 'Varsta', type: 'select', required: true, options: ['0-6 luni', '6-12 luni', '1-2 ani', '3-5 ani', '6-9 ani', '10+ ani'], order: 1 },
       { key: 'gender', label: 'Gen', type: 'select', required: false, options: ['Baiat', 'Fata', 'Unisex'] },
@@ -48,10 +48,10 @@ const CATEGORIES = [
     ],
     subcategories: [],
   },
-  // 3) Sport & Timp Liber (sport-leisure)
+  // 3) Sport & Timp Liber (canonical: sport)
   {
     name: 'Sport & Timp Liber',
-    slug: 'sport-leisure',
+    slug: 'sport',
     fields: [
       { key: 'sportType', label: 'Tip sport', type: 'select', required: true, options: ['Fitness', 'Ciclism', 'Fotbal', 'Tenis', 'Pescuit', 'Camping', 'Ski', 'Altul'], order: 1 },
       { key: 'condition', label: 'Stare', type: 'select', required: true, options: ['Nou', 'Folosit'], order: 2 },
@@ -64,10 +64,10 @@ const CATEGORIES = [
     ],
     subcategories: [],
   },
-  // 4) Educatie & Cursuri (education-courses)
+  // 4) Educatie & Cursuri (canonical: education)
   {
     name: 'Educatie & Cursuri',
-    slug: 'education-courses',
+    slug: 'education',
     fields: [
       { key: 'courseType', label: 'Tip curs', type: 'select', required: true, options: ['Meditatii', 'Curs online', 'Curs offline', 'Training companie'], order: 1 },
       { key: 'subject', label: 'Materie / Domeniu', type: 'text', required: true, order: 2 },
@@ -90,9 +90,14 @@ export async function run() {
   let created = 0;
   let updated = 0;
   for (const cat of CATEGORIES) {
+    const updateSet = { name: cat.name, fields: cat.fields };
+    // Only set subcategories when seed has a non-empty array (preserve existing DB subcategories)
+    if (Array.isArray(cat.subcategories) && cat.subcategories.length > 0) {
+      updateSet.subcategories = cat.subcategories;
+    }
     const result = await Category.findOneAndUpdate(
       { slug: cat.slug },
-      { $set: { name: cat.name, fields: cat.fields, subcategories: cat.subcategories || [] } },
+      { $set: updateSet },
       { new: true, upsert: true, runValidators: true }
     );
     const isNew = result.createdAt && result.updatedAt && result.createdAt.getTime() === result.updatedAt.getTime();

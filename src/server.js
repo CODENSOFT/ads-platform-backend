@@ -57,6 +57,8 @@ const startServer = async () => {
         environment: NODE_ENV,
         database: 'MongoDB Atlas',
       });
+      const categorySlugs = ['auto', 'real-estate', 'electronics', 'home-garden', 'fashion-beauty', 'jobs', 'services'];
+      console.log('[BOOT] API ready. Categories: GET /api/categories (list), GET /api/categories/:slug e.g. /api/categories/auto → schema (fields + subcategories). Expected slugs:', categorySlugs.join(', '));
     });
   } catch (error) {
     logger.error('Failed to start server', {

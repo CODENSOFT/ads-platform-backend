@@ -181,35 +181,47 @@ export const startChat = async (req, res, next) => {
     const user1Id = new mongoose.Types.ObjectId(a);
     const user2Id = new mongoose.Types.ObjectId(b);
 
-    // Create new chat ALWAYS (unlimited chats allowed between same users)
-    // Pre-validate hook will validate and set user1/user2
-    const chat = await Chat.create({
+    // One conversation per pair: find existing chat where current user has not deleted it for themselves
+    let chat = await Chat.findOne({ user1: user1Id, user2: user2Id, deletedFor: { $ne: meObjectId } })
+      .populate('participants', 'name email')
+      .populate('lastMessage')
+      .lean();
+
+    if (chat) {
+      return res.status(200).json({
+        success: true,
+        message: 'Chat already exists',
+        chat: {
+          _id: chat._id,
+          participants: chat.participants,
+          lastMessage: chat.lastMessage,
+          createdAt: chat.createdAt,
+          updatedAt: chat.updatedAt,
+        },
+      });
+    }
+
+    // Create new chat (one per user pair)
+    const newChat = await Chat.create({
       participants: [user1Id, user2Id],
       user1: user1Id,
       user2: user2Id,
     });
+    await newChat.populate('participants', 'name email');
 
-    // Populate participants (name, email)
-    await chat.populate('participants', 'name email');
-    
-    // Log in dev mode
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[CHAT_START] Created new chat:', {
-        chatId: chat._id.toString(),
-        userId: req.user.id,
-        receiverId,
-      });
+      console.log('[CHAT_START] Created new chat:', { chatId: newChat._id.toString(), userId: req.user.id, receiverId });
     }
 
     return res.status(201).json({
       success: true,
       message: 'Chat created',
       chat: {
-        _id: chat._id,
-        participants: chat.participants,
-        lastMessage: chat.lastMessage,
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
+        _id: newChat._id,
+        participants: newChat.participants,
+        lastMessage: newChat.lastMessage,
+        createdAt: newChat.createdAt,
+        updatedAt: newChat.updatedAt,
       },
     });
   } catch (error) {
@@ -262,10 +274,20 @@ export const unreadCount = async (req, res, next) => {
     // Convert to ObjectId for query
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    // Count unread messages for current user
+    // Chat ids where user is participant and has not deleted the chat for themselves
+    const nonDeletedChatIds = await Chat.find({
+      participants: { $in: [userObjectId] },
+      deletedFor: { $ne: userObjectId },
+    })
+      .select('_id')
+      .lean()
+      .then((chats) => chats.map((c) => c._id));
+
+    // Count unread messages only in non-deleted chats
     const count = await Message.countDocuments({
       receiver: userObjectId,
       isRead: false,
+      chat: { $in: nonDeletedChatIds },
     });
 
     res.status(200).json({
@@ -296,21 +318,22 @@ export const getChats = async (req, res, next) => {
     // Convert to ObjectId for queries
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    // Find all chats where user is a participant (use user1/user2 for index efficiency)
+    // List chats where user is participant and has NOT deleted the chat for themselves
     const chats = await Chat.find({
-      $or: [
-        { user1: userObjectId },
-        { user2: userObjectId },
-      ],
+      participants: { $in: [userObjectId] },
+      deletedFor: { $ne: userObjectId },
     })
       .populate('participants', 'name email')
       .populate('lastMessage')
       .sort({ updatedAt: -1 })
       .lean();
 
-    // Get unread counts via ONE aggregation (fast, not N queries)
+    // Chat ids we're listing (all non-deleted for this user)
+    const chatIds = chats.map((c) => c._id);
+
+    // Unread counts only for these (non-deleted) chats
     const unreadAgg = await Message.aggregate([
-      { $match: { receiver: userObjectId, isRead: false } },
+      { $match: { receiver: userObjectId, isRead: false, chat: { $in: chatIds } } },
       { $group: { _id: '$chat', count: { $sum: 1 } } },
     ]);
 
@@ -319,7 +342,7 @@ export const getChats = async (req, res, next) => {
       unreadAgg.map((x) => [String(x._id), x.count])
     );
 
-    // Calculate total unread (optional, for convenience)
+    // Total unread only for listed (non-deleted) chats
     const totalUnread = unreadAgg.reduce((sum, x) => sum + x.count, 0);
 
     // Add unreadCount to each chat
@@ -367,8 +390,7 @@ export const getMessages = async (req, res, next) => {
       );
     }
 
-    // Find chat and verify user is participant
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findById(chatId).exec();
     if (!chat) {
       return next(
         new AppError('Chat not found', 404, {
@@ -378,15 +400,23 @@ export const getMessages = async (req, res, next) => {
       );
     }
 
-    // Check if user is participant
     const isParticipant = chat.participants.some(
       (participantId) => participantId.toString() === currentUserId.toString()
     );
-
     if (!isParticipant) {
       return next(
         new AppError('Access denied. You are not a participant in this chat', 403, {
           type: 'FORBIDDEN',
+        })
+      );
+    }
+
+    const deletedForIds = (chat.deletedFor || []).map((id) => id.toString());
+    if (deletedForIds.includes(currentUserId.toString())) {
+      return next(
+        new AppError('Chat not found', 404, {
+          type: 'NOT_FOUND',
+          resource: 'Chat',
         })
       );
     }
@@ -436,8 +466,10 @@ export const getChatById = async (req, res, next) => {
       });
     }
 
-    // Find chat by id
-    const chat = await Chat.findById(chatId);
+    const me = req.user._id.toString();
+    const meObjectId = new mongoose.Types.ObjectId(me);
+
+    const chat = await Chat.findOne({ _id: chatId }).exec();
     if (!chat) {
       return res.status(404).json({
         success: false,
@@ -445,14 +477,20 @@ export const getChatById = async (req, res, next) => {
       });
     }
 
-    // Verify user is participant
-    const me = req.user._id.toString();
     const isParticipant = chat.participants?.some((p) => p.toString() === me);
     if (!isParticipant) {
       return res.status(403).json({
         success: false,
         message: 'Access denied',
         details: { type: 'FORBIDDEN' },
+      });
+    }
+
+    const deletedForIds = (chat.deletedFor || []).map((id) => id.toString());
+    if (deletedForIds.includes(me)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Chat not found',
       });
     }
 
@@ -476,12 +514,13 @@ export const getChatById = async (req, res, next) => {
 };
 
 /**
- * Delete a chat and all its messages
+ * Delete a chat for the current user only (per-user delete).
  * DELETE /api/chats/:id
  */
 export const deleteChat = async (req, res, next) => {
   try {
-    if (!req.user || !req.user._id) {
+    const me = (req.user && (req.user._id || req.user.id))?.toString();
+    if (!me) {
       return res.status(401).json({
         success: false,
         message: 'Authentication required',
@@ -498,7 +537,12 @@ export const deleteChat = async (req, res, next) => {
       });
     }
 
-    const chat = await Chat.findById(chatId);
+    const meObjectId = new mongoose.Types.ObjectId(me);
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: { $in: [meObjectId] },
+    }).exec();
+
     if (!chat) {
       return res.status(404).json({
         success: false,
@@ -507,40 +551,25 @@ export const deleteChat = async (req, res, next) => {
       });
     }
 
-    const me = req.user._id.toString();
-    const isParticipant = chat.participants?.some((p) => p.toString() === me);
-    if (!isParticipant) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied',
-        details: { type: 'FORBIDDEN' },
+    const deletedForIds = (chat.deletedFor || []).map((id) => id.toString());
+    if (deletedForIds.includes(me)) {
+      return res.status(200).json({
+        success: true,
+        message: 'Already deleted.',
       });
     }
 
-    // Log only in development
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[CHAT_DELETE] user:', me, 'chat:', chatId);
-    }
+    if (!chat.deletedFor) chat.deletedFor = [];
+    chat.deletedFor.push(meObjectId);
+    if (!chat.deletedAtBy) chat.deletedAtBy = [];
+    chat.deletedAtBy.push({ user: meObjectId, at: new Date() });
+    await chat.save();
 
-    // Delete all messages belonging to this chat
-    const messagesResult = await Message.deleteMany({ chat: chat._id });
-    const messagesDeleted = messagesResult.deletedCount;
-
-    // Delete chat
-    await Chat.findByIdAndDelete(chat._id);
-
-    // Log only in development
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[CHAT_DELETE] Deleted chat and', messagesDeleted, 'messages');
-    }
+    logger.info('[CHAT_DELETE] Per-user delete', { userId: me, chatId });
 
     return res.status(200).json({
       success: true,
-      message: 'Chat deleted',
-      deleted: {
-        chatId: chatId,
-        messagesDeleted: messagesDeleted,
-      },
+      message: 'Conversation deleted.',
     });
   } catch (err) {
     return next(err);
@@ -595,8 +624,7 @@ export const sendMessage = async (req, res, next) => {
       );
     }
 
-    // Find chat and verify user is participant
-    const chat = await Chat.findById(chatId);
+    const chat = await Chat.findOne({ _id: chatId, participants: { $in: [currentUserId] } }).exec();
     if (!chat) {
       return next(
         new AppError('Chat not found', 404, {
@@ -606,11 +634,19 @@ export const sendMessage = async (req, res, next) => {
       );
     }
 
-    // Check if user is participant
+    const deletedForIds = (chat.deletedFor || []).map((id) => id.toString());
+    if (deletedForIds.includes(currentUserId.toString())) {
+      logger.warn('[CHAT_SEND_MESSAGE] Blocked: chat deleted for user', { userId: currentUserId.toString(), chatId });
+      return res.status(403).json({
+        success: false,
+        code: 'CHAT_DELETED_FOR_USER',
+        message: 'Chat is deleted',
+      });
+    }
+
     const isParticipant = chat.participants.some(
       (participantId) => participantId.toString() === currentUserId.toString()
     );
-
     if (!isParticipant) {
       return next(
         new AppError('Access denied. You are not a participant in this chat', 403, {
